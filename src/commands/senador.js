@@ -1,4 +1,4 @@
-// INÍCIO — senador.js (API nova e oficial)
+// INÍCIO — senador.js (FUNCIONANDO + PARTIDO)
 import fetch from "node-fetch";
 
 export async function cmdSenador(sock, { from, texto }, args = []) {
@@ -9,39 +9,47 @@ export async function cmdSenador(sock, { from, texto }, args = []) {
       return;
     }
 
-    // LISTA ATUAL DE SENADORES
-    const urlLista = "https://legis.senado.leg.br/dadosabertos/senador/lista/atual";
+    // LISTA ATUAL — FORÇANDO JSON
+    const urlLista = "https://legis.senado.leg.br/dadosabertos/senador/lista/atual?formato=json";
     const dados = await (await fetch(urlLista)).json();
 
     const lista = dados?.ListaSenador?.Senadores?.Senador || [];
 
-    const s = lista.find(x =>
-      x.IdentificacaoParlamentar?.NomeParlamentar
-        ?.toLowerCase()
+    const senador = lista.find(s =>
+      s.IdentificacaoParlamentar.NomeParlamentar
+        .toLowerCase()
         .includes(nome.toLowerCase())
     );
 
-    if (!s) {
+    if (!senador) {
       await sock.sendMessage(from, {
         text: `❌ Nenhum senador encontrado parecido com: *${nome}*`
       });
       return;
     }
 
-    const id = s.IdentificacaoParlamentar.CodigoParlamentar;
-    const nomeSen = s.IdentificacaoParlamentar.NomeParlamentar;
+    const id = senador.IdentificacaoParlamentar.CodigoParlamentar;
+    const nomeSen = senador.IdentificacaoParlamentar.NomeParlamentar;
+    const partido = senador.IdentificacaoParlamentar.SiglaPartidoParlamentar || "—";
+    const uf = senador.IdentificacaoParlamentar.UfParlamentar || "—";
 
-    // DESPESAS DO SENADOR
-    const urlDesp = `https://legis.senado.leg.br/dadosabertos/senador/${id}/despesas`;
-    const despesas = await (await fetch(urlDesp)).json();
+    // DESPESAS — FORÇANDO JSON
+    const urlDesp = `https://legis.senado.leg.br/dadosabertos/senador/${id}/despesas?formato=json`;
+    const dadosDesp = await (await fetch(urlDesp)).json();
 
     const listaDesp =
-      despesas?.DespesasParlamentares?.Despesas?.Despesas?.Despesa || [];
+      dadosDesp?.DespesasParlamentares?.Despesas?.Despesas?.Despesa || [];
 
-    const total = listaDesp.reduce((acc, d) => acc + Number(d.ValorReembolsado || 0), 0);
+    const total = listaDesp.reduce(
+      (acc, d) => acc + Number(d.ValorReembolsado || 0),
+      0
+    );
 
     let resposta = `
 🟦 *Zeffa investigou o Senador ${nomeSen}:*
+
+🏛️ *Partido:* ${partido}
+📍 *Estado:* ${uf}
 
 💸 *Total reembolsado:* R$ ${total.toFixed(2)}
 
@@ -49,14 +57,15 @@ export async function cmdSenador(sock, { from, texto }, args = []) {
 `;
 
     const categorias = {};
+
     listaDesp.forEach(d => {
-      const c = d.TipoDespesa || "Outros";
-      categorias[c] = (categorias[c] || 0) + Number(d.ValorReembolsado || 0);
+      const cat = d.TipoDespesa || "Outros";
+      categorias[cat] = (categorias[cat] || 0) + Number(d.ValorReembolsado || 0);
     });
 
     for (const c in categorias) {
-      const perc = ((categorias[c] / total) * 100).toFixed(1);
-      resposta += `- ${c}: ${perc}%\n`;
+      const pct = ((categorias[c] / total) * 100).toFixed(1);
+      resposta += `- ${c}: ${pct}%\n`;
     }
 
     resposta += `\n📌 *Fonte:* Dados Abertos do Senado`;
@@ -68,4 +77,3 @@ export async function cmdSenador(sock, { from, texto }, args = []) {
     await sock.sendMessage(from, { text: "❌ Erro ao consultar senador!" });
   }
 }
-// FIM — senador.js
