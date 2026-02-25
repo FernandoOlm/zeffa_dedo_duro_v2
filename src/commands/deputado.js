@@ -180,19 +180,22 @@ export async function cmdDeputado(sock, jid, args) {
     await status(sock, jid, "📦 Pegando gastos CEAP...");
     const ceap = await pegaCEAP(id);
 
-    // 6) Cartão corporativo
-    await status(sock, jid, "💳 Checando cartão corporativo...");
+// 6) Cartão corporativo
+await status(sock, jid, "💳 Checando cartão corporativo...");
 const vinculosCC = [];
 
 for (const f of ceap.top) {
   const dados = await consultaCartaoPorCNPJ(f.cnpj, CGU_KEY);
+
   if (dados.length) {
-vinculosCC.push({
-  cnpj: f.cnpj,
-  nome: dados[0]?.estabelecimento?.nome || "Fornecedor não identificado",
-  valor: f.total,
-  qtd: dados.length
-});
+    const totalCartao = dados.reduce((s, x) => s + (x.valor || 0), 0);
+
+    vinculosCC.push({
+      cnpj: f.cnpj,
+      nome: dados[0]?.nome || "Fornecedor não identificado",
+      qtd: dados.length,
+      totalCartao,
+    });
   }
 }
 
@@ -249,7 +252,9 @@ for (const f of ceap.top) {
       txt += "Nenhum vínculo encontrado.\n\n";
     } else {
       vinculosCC.forEach(v => {
-        txt += `• *${v.nome}* (${v.cnpj}) — ${v.qtd} registros\n`;
+        txt += `• *${v.nome}* (${v.cnpj}) — ${v.qtd} registros — R$ ${v.totalCartao.toLocaleString(
+  "pt-BR"
+)}\n`;
       });
       txt += "\n";
     }
