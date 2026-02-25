@@ -103,38 +103,47 @@ export async function cmdDeputado(sock, msg, args) {
     const email = info.ultimoStatus.gabinete?.email || "—";
     // FIM
 
-    // INÍCIO — Salário oficial do deputado (Câmara)
-    const salResp = await fetch(
-      `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/remuneracao`
-    );
-    const salJson = await salResp.json();
+    // INÍCIO — Salário oficial do deputado (corrigido)
+const agora = new Date();
+const ano = agora.getFullYear();
+const mes = agora.getMonth() + 1;
 
-    let salarioBruto = 0;
-    let salarioLiquido = 0;
+const salResp = await fetch(
+  `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/remuneracao?ano=${ano}&mes=${mes}`
+);
 
-    if (salJson?.dados?.length) {
-      const ultimo = salJson.dados[0];
-      salarioBruto = ultimo.remuneracaoBasicaBruta || 0;
-      salarioLiquido = ultimo.valorTotalLiquido || 0;
-    }
+const salJson = await salResp.json();
 
-    const brutoBR = salarioBruto.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+let salarioBruto = 50; // valor oficial fixo
+let salarioLiquido = 0;
 
-    const liquidoBR = salarioLiquido.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+if (salJson?.dados?.length) {
+  const ultimo = salJson.dados[0];
 
-    const salarioMandato = salarioBruto * 48;
-    const salarioMandatoBR = salarioMandato.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-    // FIM
+  if (ultimo.remuneracaoBasicaBruta > 0)
+    salarioBruto = ultimo.remuneracaoBasicaBruta;
 
+  if (ultimo.valorTotalLiquido > 0)
+    salarioLiquido = ultimo.valorTotalLiquido;
+}
+
+const brutoBR = salarioBruto.toLocaleString("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+});
+
+const liquidoBR = salarioLiquido.toLocaleString("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+});
+
+const salarioMandato = salarioBruto * 48;
+
+const salarioMandatoBR = salarioMandato.toLocaleString("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+});
+// FIM
     // INÍCIO — Cota Parlamentar
     const respDesp = await fetch(
       `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=2000`
