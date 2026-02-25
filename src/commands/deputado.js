@@ -1,92 +1,58 @@
-// INÍCIO — Comando !deputado (versão compatível com Zeffa/Ferdinando)
-
 import fetch from "node-fetch";
 
-// 🔍 Busca deputado por nome
+// Buscar deputado por nome
 async function buscarDeputado(nome) {
   const url = `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(
     nome
   )}`;
-  const resp = await fetch(url);
-  const json = await resp.json();
-  return json.dados?.[0] || null;
+  const r = await fetch(url);
+  const j = await r.json();
+
+  return j.dados?.[0] || null;
 }
 
-// 📊 Pega detalhes + despesas
-async function buscarCapivara(id) {
-  const detalhesURL = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`;
-  const despesasURL = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas`;
-
-  const [detalhesResp, despesasResp] = await Promise.all([
-    fetch(detalhesURL),
-    fetch(despesasURL)
-  ]);
-
-  const detalhes = await detalhesResp.json();
-  const despesas = await despesasResp.json();
-
-  return {
-    detalhes: detalhes.dados,
-    despesas: despesas.dados
-  };
+// Buscar despesas
+async function buscarDespesas(id) {
+  const url = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas`;
+  const r = await fetch(url);
+  const j = await r.json();
+  return j.dados || [];
 }
 
-// 🧠 Gera resumo
-function gerarResumo(cap) {
-  const nome = cap.detalhes.nomeCivil;
-  const total = cap.despesas.reduce((acc, x) => acc + x.valorLiquido, 0);
+// Gerar texto final bonitão
+function montarResumo(dep, despesas) {
+  let total = 0;
+  let maior = { valor: 0, tipo: "Nenhuma" };
 
-  const maior =
-    cap.despesas.sort((a, b) => b.valorLiquido - a.valorLiquido)[0] || {
-      valorLiquido: 0,
-      tipoDocumento: "Nenhuma"
-    };
+  for (const d of despesas) {
+    total += d.valorLiquido;
+    if (d.valorLiquido > maior.valor) {
+      maior = { valor: d.valorLiquido, tipo: d.tipoDocumento };
+    }
+  }
 
   return `
-🕵️ *Zeffa Dedo Duro — CAPIVARA FEDERAL*
+🕵️ *Zeffa Dedo Duro — CAPIVARA DO DEPUTADO*
 
-👤 *${nome}*
+👤 *${dep.nome}*
 💰 Total gasto: R$ ${total.toFixed(2)}
 
 📄 Nota mais cara:
-- R$ ${maior.valorLiquido.toFixed(2)}
-- ${maior.tipoDocumento}
+- R$ ${maior.valor.toFixed(2)}
+- ${maior.tipo}
 
 Zeffa rastreou tudo 😘
 `;
 }
 
-// 🚀 Comando principal (agora compatível com o handler!)
-export async function cmdDeputado(msg, sock, from, args) {
-  const nome = args.join(" ").trim();
+// Função principal (simples!)
+export async function cmdDeputado(nome) {
+  if (!nome) return "Use: !deputado Nome do deputado";
 
-  if (!nome) {
-    return {
-      tipo: "texto",
-      resposta: "Use assim → *!deputado nome_do_deputado*"
-    };
-  }
+  const dep = await buscarDeputado(nome);
+  if (!dep) return `Nenhum deputado encontrado com nome parecido com: *${nome}*`;
 
-  // 1) Buscar deputado
-  const deputado = await buscarDeputado(nome);
+  const despesas = await buscarDespesas(dep.id);
 
-  if (!deputado) {
-    return {
-      tipo: "texto",
-      resposta: `Nenhum deputado encontrado com nome parecido com *${nome}*.`
-    };
-  }
-
-  // 2) Buscar despesas
-  const capivara = await buscarCapivara(deputado.id);
-
-  // 3) Resumo bonitão
-  const resumo = gerarResumo(capivara);
-
-  return {
-    tipo: "texto",
-    resposta: resumo
-  };
+  return montarResumo(dep, despesas);
 }
-
-// FIM — deputado.js
