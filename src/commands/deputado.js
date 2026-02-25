@@ -1,4 +1,4 @@
-// INÍCIO — deputado.js FULL MODE FUNCIONAL
+// INÍCIO — deputado.js FULL MODE AJUSTADO
 
 import fetch from "node-fetch";
 import { scrapeRemuneracao } from "../utils/scraperRemuneracao.js";
@@ -6,30 +6,35 @@ import { scrapeGabinete } from "../utils/scraperGabinete.js";
 import { pegaEmendas } from "../utils/emendas.js";
 import { consultaCartaoPorCNPJ } from "../utils/cartaoVinculos.js";
 
-export async function cmdDeputado(sock, jid, nomeBuscado) {
+export async function cmdDeputado(sock, jid, args) {
   try {
-    // NORMALIZA JID -> sempre string
-    jid = typeof jid === "string" ? jid : jid?.remoteJid || jid?.jid || "";
+    // transforma args em nome completo
+    const nomeBuscado = Array.isArray(args) ? args.join(" ").trim() : String(args || "");
 
-    if (!jid) {
+    // JID sempre string
+    if (typeof jid !== "string") {
+      jid = jid?.remoteJid || jid?.jid || "";
+    }
+
+    if (!jid || typeof jid !== "string") {
       console.log("❌ JID inválido:", jid);
       return;
     }
 
-    // Aviso inicial
-    await sock.sendMessage(jid, { text: `🔍 *OK! Investigando o deputado ${nomeBuscado}...*\nIsso pode levar alguns segundos.` });
-    console.log("📥 Buscando deputado:", nomeBuscado);
+    // Mensagem inicial
+    await sock.sendMessage(jid, { text: `🔍 Investigando *${nomeBuscado}*...` });
 
-    // 1) BUSCAR DEPUTADO
-    await sock.sendMessage(jid, { text: "👤 Buscando dados básicos do deputado..." });
+    // BUSCAR DEPUTADO
+    await sock.sendMessage(jid, { text: "👤 Buscando dados básicos..." });
 
     const resp = await fetch(
       `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(nomeBuscado)}`
     );
+
     const data = await resp.json();
 
     if (!data?.dados?.length) {
-      await sock.sendMessage(jid, { text: "❌ Nenhum deputado encontrado com esse nome." });
+      await sock.sendMessage(jid, { text: "❌ Nenhum deputado encontrado." });
       return;
     }
 
@@ -38,54 +43,50 @@ export async function cmdDeputado(sock, jid, nomeBuscado) {
 
     // DETALHES
     const detResp = await fetch(`https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`);
-    const detJson = await detResp.json();
-    const info = detJson.dados;
+    const info = (await detResp.json()).dados;
 
     const partido = info.ultimoStatus.siglaPartido;
     const uf = info.ultimoStatus.siglaUf;
 
-    // 2) SCRAPER SALÁRIO
-    await sock.sendMessage(jid, { text: "💰 Coletando salário oficial (scraping)..." });
+    // SALÁRIO
+    await sock.sendMessage(jid, { text: "💰 Pegando salário..." });
     const salario = await scrapeRemuneracao(id);
 
     const salarioBruto = salario.salarioBruto || "Indisponível";
     const salarioLiquido = salario.salarioLiquido || "Indisponível";
 
-    // 3) GABINETE (ASSESSORES)
-    await sock.sendMessage(jid, { text: "👥 Consultando assessores do gabinete..." });
+    // GABINETE
+    await sock.sendMessage(jid, { text: "👥 Consultando assessores..." });
     const gabinete = await scrapeGabinete(id);
 
-    // 4) EMENDAS PARLAMENTARES
-    await sock.sendMessage(jid, { text: "📑 Coletando emendas parlamentares..." });
+    // EMENDAS
+    await sock.sendMessage(jid, { text: "📑 Coletando emendas..." });
     const emendas = await pegaEmendas(id);
 
     const totalEmendas = emendas.reduce((s, e) => s + (e.valorAutorizado || 0), 0);
     const totalPagas = emendas.reduce((s, e) => s + (e.valorPago || 0), 0);
 
-    // 5) CEAP — DESPESAS
-    await sock.sendMessage(jid, { text: "📦 Baixando despesas do mandato (CEAP)..." });
+    // CEAP
+    await sock.sendMessage(jid, { text: "📦 Coletando despesas CEAP..." });
 
     const ceapResp = await fetch(
       `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?ano=2024&pagina=1`
     );
-    const ceapJson = await ceapResp.json();
 
-    const despesas = ceapJson?.dados || [];
+    const despesas = (await ceapResp.json()).dados || [];
     const totalCEAP = despesas.reduce((s, d) => s + d.valorDocumento, 0);
 
-    // Top Fornecedores
     const fornecedores = {};
     for (const d of despesas) {
-      if (!fornecedores[d.cnpjCpfFornecedor]) fornecedores[d.cnpjCpfFornecedor] = 0;
-      fornecedores[d.cnpjCpfFornecedor] += d.valorDocumento;
+      fornecedores[d.cnpjCpfFornecedor] = (fornecedores[d.cnpjCpfFornecedor] || 0) + d.valorDocumento;
     }
 
     const topFornecedores = Object.entries(fornecedores)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    // 6) CARTÃO CORPORATIVO — ligação indireta
-    await sock.sendMessage(jid, { text: "💳 Verificando fornecedores vinculados ao cartão corporativo..." });
+    // CARTÃO CORPORATIVO
+    await sock.sendMessage(jid, { text: "💳 Conferindo fornecedores no cartão corporativo..." });
 
     const CGU_KEY = process.env.CGU_API_KEY;
     const vinculosCC = [];
@@ -93,35 +94,24 @@ export async function cmdDeputado(sock, jid, nomeBuscado) {
     for (const [cnpj, valor] of topFornecedores) {
       const dados = await consultaCartaoPorCNPJ(cnpj, CGU_KEY);
       if (dados.length) {
-        vinculosCC.push({
-          cnpj,
-          valor,
-          registros: dados.length
-        });
+        vinculosCC.push({ cnpj, valor, registros: dados.length });
       }
     }
 
-    // MONTAR RESPOSTA FINAL
+    // RESPOSTA FINAL
     let resposta = `🕵️ *Zeffa investigou ${info.nomeCivil}:*\n(${partido} - ${uf})\n\n`;
 
     resposta += "━━━━━━━━━━━━━━━━━━\n";
-    resposta += `📌 *CARGO ATUAL*\n• ${info.ultimoStatus.cargo}\n• Órgão: Câmara dos Deputados\n\n`;
+    resposta += `📌 *REMUNERAÇÃO*\nBruto: ${salarioBruto}\nLíquido: ${salarioLiquido}\n\n`;
 
     resposta += "━━━━━━━━━━━━━━━━━━\n";
-    resposta += `📌 *REMUNERAÇÃO (Scraping)*\n• Bruto mensal: ${salarioBruto}\n• Líquido mensal: ${salarioLiquido}\n\n`;
+    resposta += `📌 *GABINETE*\n${gabinete.length} assessores\n\n`;
 
     resposta += "━━━━━━━━━━━━━━━━━━\n";
-    resposta += `📌 *VERBA DE GABINETE (Assesores)*\n• Total de assessores: ${gabinete.length}\n`;
-    gabinete.slice(0, 5).forEach(a => {
-      resposta += `• ${a.nome} — ${a.cargo} — ${a.remuneracao}\n`;
-    });
-    resposta += gabinete.length > 5 ? "• …e mais.\n\n" : "\n";
+    resposta += `📌 *EMENDAS*\nAutorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\nPago: R$ ${totalPagas.toLocaleString("pt-BR")}\nTotal: ${emendas.length} emendas\n\n`;
 
     resposta += "━━━━━━━━━━━━━━━━━━\n";
-    resposta += `📌 *EMENDAS PARLAMENTARES*\n• Total autorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\n• Total pago: R$ ${totalPagas.toLocaleString("pt-BR")}\n• Emendas encontradas: ${emendas.length}\n\n`;
-
-    resposta += "━━━━━━━━━━━━━━━━━━\n";
-    resposta += `📌 *COTA PARLAMENTAR (CEAP)*\n• Total gasto em 2024: R$ ${totalCEAP.toLocaleString("pt-BR")}\n\n`;
+    resposta += `📌 *CEAP*\nGasto 2024: R$ ${totalCEAP.toLocaleString("pt-BR")}\n\n`;
 
     resposta += "━━━━━━━━━━━━━━━━━━\n";
     resposta += "📌 *TOP FORNECEDORES*\n";
@@ -132,24 +122,16 @@ export async function cmdDeputado(sock, jid, nomeBuscado) {
 
     resposta += "━━━━━━━━━━━━━━━━━━\n";
     resposta += "💳 *Vínculos com Cartão Corporativo*\n";
-    if (!vinculosCC.length) {
-      resposta += "Nenhum fornecedor vinculado ao cartão corporativo.\n\n";
-    } else {
-      vinculosCC.forEach(v => {
-        resposta += `• ${v.cnpj} — ${v.registros} registros no cartão corporativo\n`;
-      });
-      resposta += "\n";
-    }
-
-    resposta += "━━━━━━━━━━━━━━━━━━\n";
-    resposta += "📌 *FONTES*\n• Câmara dos Deputados\n• CGU — Portal da Transparência\n• Senado — SigaBrasil\n• CEIS / CNEP / CEAF / CEPIM\n\n🔥 *Zeffa te entregou a capivara FULL MODE.*";
+    resposta += vinculosCC.length
+      ? vinculosCC.map(v => `• ${v.cnpj} — ${v.registros} registros`).join("\n")
+      : "Nenhum vínculo encontrado.\n";
 
     await sock.sendMessage(jid, { text: resposta });
 
   } catch (err) {
     console.error("❌ Erro no cmdDeputado:", err);
-    await sock.sendMessage(jid, { text: "❌ Erro interno ao gerar a capivara." });
+    await sock.sendMessage(jid, { text: "❌ Erro ao gerar relatório." });
   }
 }
 
-// FIM — deputado.js FULL MODE FUNCIONAL
+// FIM — deputado.js AJUSTADO
