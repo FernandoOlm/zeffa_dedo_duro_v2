@@ -173,7 +173,7 @@ export async function cmdDeputado(sock, jid, args) {
 
     // 4) Emendas
     await status(sock, jid, "📑 Pegando emendas parlamentares...");
-    const emendas = await pegaEmendas(nome);
+    const emendas = await pegaEmendas(nome, CGU_KEY);
     const totalEmendas = emendas.reduce((s, e) => s + (e.autorizado || 0), 0);
     const totalPagas = emendas.reduce((s, e) => s + (e.pago || 0), 0);
 
