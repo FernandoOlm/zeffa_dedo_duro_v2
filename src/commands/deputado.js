@@ -175,7 +175,7 @@ export async function cmdDeputado(sock, jid, args) {
     await status(sock, jid, "📑 Pegando emendas parlamentares...");
 // ===== EMENDAS ===================================================
 const { lista: emendas, total: totalEmendas } = await pegaEmendas({
-  idDeputado,
+  idDeputado: id,
   nome
 });
 
