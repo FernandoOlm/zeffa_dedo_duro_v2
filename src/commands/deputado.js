@@ -187,11 +187,12 @@ const vinculosCC = [];
 for (const f of ceap.top) {
   const dados = await consultaCartaoPorCNPJ(f.cnpj, CGU_KEY);
   if (dados.length) {
-    vinculosCC.push({
-      cnpj: f.cnpj,
-      valor: f.total,
-      qtd: dados.length
-    });
+vinculosCC.push({
+  cnpj: f.cnpj,
+  nome: dados[0]?.estabelecimento?.nome || "Fornecedor não identificado",
+  valor: f.total,
+  qtd: dados.length
+});
   }
 }
 
@@ -248,7 +249,7 @@ for (const f of ceap.top) {
       txt += "Nenhum vínculo encontrado.\n\n";
     } else {
       vinculosCC.forEach(v => {
-        txt += `• ${v.cnpj} — ${v.qtd} registros\n`;
+        txt += `• *${v.nome}* (${v.cnpj}) — ${v.qtd} registros\n`;
       });
       txt += "\n";
     }
