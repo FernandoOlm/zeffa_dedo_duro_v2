@@ -1,13 +1,15 @@
 // utils/emendas.js
 // ======================================================
-// EMENDAS PARLAMENTARES — VIA SIGA BRASIL (FUNCIONANDO)
+// EMENDAS PARLAMENTARES — SIGA BRASIL (FUNCIONANDO)
+// Mantém compatibilidade com "pegaEmendas" do deputado.js
 // ======================================================
 
 import fetch from "node-fetch";
 
 const anos = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
 
-export async function buscarEmendas(nomeParlamentar) {
+// Função principal (nome que você quiser)
+async function buscarEmendas(nomeParlamentar) {
   const emendas = [];
 
   for (const ano of anos) {
@@ -22,7 +24,7 @@ export async function buscarEmendas(nomeParlamentar) {
         continue;
       }
 
-      const dados = await r.json();
+      const dados = await r.json().catch(() => null);
       if (!Array.isArray(dados)) continue;
 
       dados.forEach((e) => {
@@ -46,15 +48,14 @@ export async function buscarEmendas(nomeParlamentar) {
     }
   }
 
-  // =============================
-  // SOMAR VALORES
-  // =============================
-  const totalEmpenhado = emendas.reduce((t, e) => t + (e.empenhado || 0), 0);
-  const totalPago = emendas.reduce((t, e) => t + (e.pago || 0), 0);
-
   return {
-    autorizado: totalEmpenhado,
-    pago: totalPago,
+    autorizado: emendas.reduce((t, e) => t + (e.empenhado || 0), 0),
+    pago: emendas.reduce((t, e) => t + (e.pago || 0), 0),
     lista: emendas,
   };
 }
+
+// ======================================================
+// 🔥 Export com nome ORIGINAL esperado pelo seu deputado.js
+// ======================================================
+export const pegaEmendas = buscarEmendas;
