@@ -4,16 +4,15 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// Carrega sempre do root do projeto, independente de onde o index.js está
 dotenv.config({ path: path.join(__dirname, "../../.env") });
-// FIM — ENV
+// FIM ENV
 
-// INÍCIO — Imports básicos
+// INÍCIO imports
 import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion
 } from "@whiskeysockets/baileys";
+
 import qrcode from "qrcode-terminal";
 
 import { cmdDeputado } from "../commands/deputado.js";
@@ -21,7 +20,7 @@ import { comandoPing } from "../commands/ping.js";
 import { cmdSenador } from "../commands/senador.js";
 import { cmdPresidente } from "../commands/presidente.js";
 import { cmdGovernador } from "../commands/governador.js";
-// FIM — Imports
+// FIM imports
 
 // BOT
 async function startBot() {
@@ -44,13 +43,14 @@ async function startBot() {
     }
   });
 
-  // 📩 RECEBER MENSAGENS
+  // RECEBER MENSAGENS
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
     if (!msg?.message) return;
     if (msg.key.fromMe) return;
 
-    const from = msg.key.remoteJid;
+    const from = msg.key.remoteJid; // JID REAL AQUI
+
     const texto =
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
@@ -62,28 +62,30 @@ async function startBot() {
     const comando = partes.shift()?.toLowerCase();
     const args = partes || [];
 
+    // =============== COMANDOS ================
+
     if (comando === "!ping") {
-      await comandoPing(sock, { from, texto });
+      await comandoPing(sock, from, args);
       return;
     }
 
     if (comando === "!deputado") {
-      await cmdDeputado(sock, { from, texto }, args);
+      await cmdDeputado(sock, from, args);
       return;
     }
 
     if (comando === "!senador") {
-      await cmdSenador(sock, { from, texto }, args);
+      await cmdSenador(sock, from, args);
       return;
     }
 
     if (comando === "!presidente") {
-      await cmdPresidente(sock, { from, texto }, args);
+      await cmdPresidente(sock, from, args);
       return;
     }
 
     if (comando === "!governador") {
-      await cmdGovernador(sock, { from, texto }, args);
+      await cmdGovernador(sock, from, args);
       return;
     }
   });
