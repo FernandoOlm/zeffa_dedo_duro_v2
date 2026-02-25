@@ -1,40 +1,43 @@
-// INÍCIO — utils/emendas.js
+// INÍCIO — utils/emendas.js (CGU OFICIAL)
 
 import fetch from "node-fetch";
-import * as cheerio from "cheerio";
 
-// SIGABRASIL NÃO TEM API DIRETA → Web scraping REAL
-export async function pegaEmendas(nome) {
+export async function pegaEmendas(nome, key) {
   try {
-    // Normaliza nome
-    const query = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const url = `https://api.portaldatransparencia.gov.br/api-de-dados/emendas?nomeAutor=${encodeURIComponent(
+      nome
+    )}&pagina=1`;
 
-    const url = `https://www12.senado.leg.br/orcamento/sigabrasil/web/emendas?autor=${encodeURIComponent(
-      query
-    )}`;
-
-    const html = await fetch(url).then(r => r.text());
-    const $ = cheerio.load(html);
-
-    const lista = [];
-
-    $("table tbody tr").each((_, el) => {
-      const cols = $(el).find("td");
-      if (cols.length < 5) return;
-
-      lista.push({
-        codigo: $(cols[0]).text().trim(),
-        tipo: $(cols[1]).text().trim(),
-        autorizado: parseFloat($(cols[3]).text().trim().replace(/\./g, "").replace(",", ".")) || 0,
-        pago: parseFloat($(cols[4]).text().trim().replace(/\./g, "").replace(",", ".")) || 0,
-      });
+    const resp = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "chave-api-dados": key,
+      },
     });
 
-    return lista;
+    if (!resp.ok) {
+      console.log("Erro emendas CGU:", resp.status);
+      return [];
+    }
+
+    const dados = await resp.json();
+
+    return dados.map(e => ({
+      codigo: e.codigoEmenda,
+      ano: e.ano,
+      tipo: e.tipoEmenda,
+      numero: e.numeroEmenda,
+      autorizado: parseFloat(e.valorEmpenhado?.replace(/\./g, "").replace(",", ".")) || 0,
+      liquidado: parseFloat(e.valorLiquidado?.replace(/\./g, "").replace(",", ".")) || 0,
+      pago: parseFloat(e.valorPago?.replace(/\./g, "").replace(",", ".")) || 0,
+      funcao: e.funcao,
+      subfuncao: e.subfuncao,
+      localidade: e.localidadeDoGasto,
+    }));
   } catch (e) {
-    console.log("Erro emendas:", e.message);
+    console.log("Erro emendas CGU:", e.message);
     return [];
   }
 }
 
-// FIM — utils/emendas.js
+// FIM — utils/emendas.js (CGU OFICIAL)

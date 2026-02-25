@@ -71,26 +71,53 @@ async function pegaSalario(cpf, CGU_KEY) {
   }
 }
 
-// =============== CEAP (COTA) ===============
-async function pegaCEAP(id) {
-  const url = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?ano=2024&pagina=1`;
-  const data = await fetch(url).then(r => r.json());
+// INÍCIO — CEAP MULTIANUAL turbo
 
-  const despesas = data?.dados || [];
-  const total = despesas.reduce((s, d) => s + d.valorDocumento, 0);
-
+export async function pegaCEAP(id) {
+  const anos = [2020, 2021, 2022, 2023, 2024, 2025, 2026]; // pode expandir
+  const totPorAno = {};
   const fornecedores = {};
-  for (const d of despesas) {
-    fornecedores[d.cnpjCpfFornecedor] =
-      (fornecedores[d.cnpjCpfFornecedor] || 0) + d.valorDocumento;
+
+  for (const ano of anos) {
+    const url = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?ano=${ano}&pagina=1`;
+    const json = await fetch(url).then(r => r.json());
+
+    const lista = json?.dados || [];
+    const totalAno = lista.reduce((s, d) => s + d.valorDocumento, 0);
+
+    totPorAno[ano] = totalAno;
+
+    // fornecedores acumulados
+    for (const d of lista) {
+      const chave = d.cnpjCpfFornecedor;
+      if (!fornecedores[chave]) {
+        fornecedores[chave] = {
+          nome: d.nomeFornecedor,
+          total: 0,
+        };
+      }
+      fornecedores[chave].total += d.valorDocumento;
+    }
   }
 
+  // top fornecedores acumulado
   const top = Object.entries(fornecedores)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 10)
+    .map(([cnpj, data]) => ({
+      cnpj,
+      nome: data.nome,
+      total: data.total,
+    }));
 
-  return { total, top };
+  return {
+    totPorAno,
+    totalGeral: Object.values(totPorAno).reduce((a, b) => a + b, 0),
+    top,
+  };
 }
+
+// FIM — CEAP MULTIANUAL
 
 // ==========================================================
 // ===============  COMANDO PRINCIPAL  =======================
@@ -189,21 +216,25 @@ export async function cmdDeputado(sock, jid, args) {
     txt += "━━━━━━━━━━━━━━━━━━\n";
     txt += `📌 *EMENDAS*\nAutorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\nPago: R$ ${totalPagas.toLocaleString("pt-BR")}\nTotal: ${emendas.length} emendas\n\n`;
 
-    txt += "━━━━━━━━━━━━━━━━━━\n";
-    txt += `📌 *CEAP (2024)*\nGasto: R$ ${ceap.total.toLocaleString("pt-BR")}\n\n`;
+   txt += "━━━━━━━━━━━━━━━━━━\n";
+txt += `📌 *CEAP — Cota Parlamentar*\n`;
+txt += `Total 2023: R$ ${ceap.totPorAno[2023].toLocaleString("pt-BR")}\n`;
+txt += `Total 2024: R$ ${ceap.totPorAno[2024].toLocaleString("pt-BR")}\n`;
+txt += `Total 2025: R$ ${ceap.totPorAno[2025].toLocaleString("pt-BR")}\n`;
+txt += `📌 *Total Geral: R$ ${ceap.totalGeral.toLocaleString("pt-BR")}*\n\n`;
 
-    txt += "━━━━━━━━━━━━━━━━━━\n";
-    txt += "📌 *TOP FORNECEDORES*\n";
-    ceap.top.forEach(([cnpj, val]) => {
-      const flags = fornecedoresSanções.find(f => f.cnpj === cnpj);
-      txt += `• ${cnpj} — R$ ${val.toLocaleString("pt-BR")}\n`;
-      txt += `  🚨 CEIS: ${flags.ceis ? "SIM" : "NÃO"} | ⚠️ CNEP: ${
-        flags.cnep ? "SIM" : "NÃO"
-      } | ❌ CEAF: ${flags.ceaf ? "SIM" : "NÃO"} | ❗ CEPIM: ${
-        flags.cepim ? "SIM" : "NÃO"
-      }\n\n`;
-    });
+txt += "━━━━━━━━━━━━━━━━━━\n";
+txt += `📌 *TOP FORNECEDORES (Acumulado)*\n`;
 
+for (const f of ceap.top) {
+  const flag = fornecedoresSanções.find(x => x.cnpj === f.cnpj);
+
+  txt += `• *${f.nome}* (${f.cnpj}) — R$ ${f.total.toLocaleString("pt-BR")}\n`;
+  txt += `  🚨 CEIS: ${flag.ceis ? "SIM" : "NÃO"} | `
+  txt += `⚠️ CNEP: ${flag.cnep ? "SIM" : "NÃO"} | `
+  txt += `❌ CEAF: ${flag.ceaf ? "SIM" : "NÃO"} | `
+  txt += `❗ CEPIM: ${flag.cepim ? "SIM" : "NÃO"}\n\n`;
+}
     txt += "━━━━━━━━━━━━━━━━━━\n";
     txt += "💳 *CARTÃO CORPORATIVO*\n";
     if (!vinculosCC.length) {
