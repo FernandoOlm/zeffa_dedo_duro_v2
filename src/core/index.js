@@ -1,3 +1,8 @@
+// INÍCIO — Carregar variáveis de ambiente
+import * as dotenv from "dotenv";
+dotenv.config({ path: './.env' }); 
+// FIM — ENV
+
 // INÍCIO — Imports básicos
 import makeWASocket, {
   useMultiFileAuthState,
@@ -81,8 +86,6 @@ async function startBot() {
     await cmdGovernador(sock, { from, texto }, args);
     return;
   }
-
-
 
   });
 }
