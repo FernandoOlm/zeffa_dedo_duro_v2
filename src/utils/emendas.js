@@ -1,26 +1,40 @@
-// INÍCIO — Emendas parlamentares (Senado / SigaBrasil)
-import axios from "axios";
+// INÍCIO — utils/emendas.js
 
-export async function pegaEmendas(codParlamentar) {
-  const url = `https://legis.senado.leg.br/dadosabertos/emenda/autor/${codParlamentar}`;
+import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 
+// SIGABRASIL NÃO TEM API DIRETA → Web scraping REAL
+export async function pegaEmendas(nome) {
   try {
-    const { data } = await axios.get(url);
+    // Normaliza nome
+    const query = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-    const emendas = data?.EmendaParlamentar?.Emendas || [];
+    const url = `https://www12.senado.leg.br/orcamento/sigabrasil/web/emendas?autor=${encodeURIComponent(
+      query
+    )}`;
 
-    return emendas.map(e => ({
-      numero: e?.Emenda?.Numero,
-      ano: e?.Emenda?.Ano,
-      funcao: e?.Emenda?.Funcao,
-      subfuncao: e?.Emenda?.Subfuncao,
-      localidade: e?.Emenda?.Localidade,
-      valorAutorizado: Number(e?.Emenda?.ValorAutorizado || 0),
-      valorPago: Number(e?.Emenda?.ValorPago || 0)
-    }));
+    const html = await fetch(url).then(r => r.text());
+    const $ = cheerio.load(html);
 
-  } catch (err) {
+    const lista = [];
+
+    $("table tbody tr").each((_, el) => {
+      const cols = $(el).find("td");
+      if (cols.length < 5) return;
+
+      lista.push({
+        codigo: $(cols[0]).text().trim(),
+        tipo: $(cols[1]).text().trim(),
+        autorizado: parseFloat($(cols[3]).text().trim().replace(/\./g, "").replace(",", ".")) || 0,
+        pago: parseFloat($(cols[4]).text().trim().replace(/\./g, "").replace(",", ".")) || 0,
+      });
+    });
+
+    return lista;
+  } catch (e) {
+    console.log("Erro emendas:", e.message);
     return [];
   }
 }
-// FIM
+
+// FIM — utils/emendas.js

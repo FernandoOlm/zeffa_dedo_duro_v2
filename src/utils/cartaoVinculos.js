@@ -1,21 +1,26 @@
-// INÍCIO — Relacionamento com cartão corporativo
-import axios from "axios";
+// INÍCIO — utils/cartaoVinculos.js
 
-export async function consultaCartaoPorCNPJ(cnpj, apiKey) {
+import fetch from "node-fetch";
+
+export async function consultaCartaoPorCNPJ(cnpj, key) {
   try {
     const url = `https://api.portaldatransparencia.gov.br/api-de-dados/cartoes?cpfCnpjFavorecido=${cnpj}&pagina=1`;
 
-    const { data } = await axios.get(url, {
+    const resp = await fetch(url, {
       headers: {
-        "chave-api-dados": apiKey,
-        Accept: "application/json"
+        "Accept": "application/json",
+        "chave-api-dados": key
       }
     });
 
-    return data || [];
+    if (!resp.ok) return [];
 
-  } catch (err) {
+    const data = await resp.json();
+    return data || [];
+  } catch (e) {
+    console.log("Erro cartão:", e.message);
     return [];
   }
 }
-// FIM
+
+// FIM — utils/cartaoVinculos.js
