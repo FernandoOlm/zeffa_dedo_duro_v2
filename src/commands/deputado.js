@@ -1,4 +1,4 @@
-// INÍCIO — Importações necessárias
+// INÍCIO — Importações
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 dotenv.config();
@@ -6,7 +6,7 @@ dotenv.config();
 
 const CGU_KEY = process.env.CGU_API_KEY;
 
-// INÍCIO — Helper para chamadas CGU
+// INÍCIO — Helper CGU (GET)
 async function cguGet(endpoint) {
   const url = `https://api.portaldatransparencia.gov.br/api-de-dados/${endpoint}`;
 
@@ -18,162 +18,242 @@ async function cguGet(endpoint) {
   });
 
   if (!resp.ok) {
-    throw new Error(`Erro CGU: ${resp.status}`);
+    throw new Error(`Erro CGU: ${resp.status} — ${url}`);
   }
 
   return await resp.json();
 }
 // FIM
 
-// INÍCIO — Checar empresa no CEIS/CNEP/CEAF
-async function checarSancoes(cnpj) {
+// INÍCIO — Checar sanções CEIS/CNEP/CEAF/CEPIM
+async function checarSancoesFornecedor(cnpj) {
   const ceis = await cguGet(`ceis?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
   const cnep = await cguGet(`cnep?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
   const ceaf = await cguGet(`ceaf?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
+  const cepim = await cguGet(`cepim?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
 
   return {
     ceis: ceis.length,
     cnep: cnep.length,
     ceaf: ceaf.length,
+    cepim: cepim.length,
   };
 }
 // FIM
 
-// INÍCIO — Checar se empresa recebe da União
-async function checarFavorecido(cnpj) {
+// INÍCIO — Checar fornecedor: valores recebidos da União
+async function checarFavorecidoUniao(cnpj) {
   const dados = await cguGet(
     `pessoas-juridicas?cpfCnpj=${cnpj}&pagina=1`
   ).catch(() => []);
 
   if (!dados.length) return null;
 
+  const pj = dados[0];
+
   return {
-    nome: dados[0]?.razaoSocial,
-    favorecidoDespesas: dados[0]?.favorecidoDespesas || false,
-    possuiContratacao: dados[0]?.possuiContratacao || false,
-    convenios: dados[0]?.convenios || false,
-    sancionadoCEPIM: dados[0]?.sancionadoCEPIM || false,
+    nome: pj.razaoSocial,
+    totalFederal: pj.favorecidoDespesas || 0,
+    possuiContratos: pj.possuiContratacao || false,
+    convenios: pj.convenios || false,
+    sancionadoCEPIM: pj.sancionadoCEPIM || false,
   };
 }
 // FIM
 
-// INÍCIO — Função principal
+// INÍCIO — Função principal do comando
 export async function cmdDeputado(sock, msg, args) {
   try {
     const nomeBusca = args.join(" ").trim();
     if (!nomeBusca) {
       await sock.sendMessage(msg.from, {
-        text: "Digite o nome: !deputado fulano",
+        text: "Digite o nome do deputado: !deputado fulano",
       });
       return;
     }
 
-    console.log("🔍 Buscando deputado:", nomeBusca);
-
-    // --- 1) Buscar deputado na Câmara ---
-    const urlDep = `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(
+    // INÍCIO — Busca inicial na Câmara
+    const urlBusca = `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(
       nomeBusca
     )}`;
-    const depResp = await fetch(urlDep);
-    const depJson = await depResp.json();
+    const respBusca = await fetch(urlBusca);
+    const dadosBusca = await respBusca.json();
 
-    if (!depJson?.dados?.length) {
+    if (!dadosBusca?.dados?.length) {
       await sock.sendMessage(msg.from, {
-        text: `Nenhum deputado encontrado com o nome: *${nomeBusca}*`,
+        text: `Nenhum deputado encontrado com: *${nomeBusca}*`,
       });
       return;
     }
 
-    const deputado = depJson.dados[0];
+    const deputado = dadosBusca.dados[0];
     const id = deputado.id;
+    // FIM
 
-    // --- 2) Detalhes pessoais ---
-    const detResp = await fetch(
+    // INÍCIO — Detalhes pessoais
+    const respDetalhes = await fetch(
       `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`
     );
-    const detJson = await detResp.json();
-    const info = detJson?.dados;
+    const detalhes = await respDetalhes.json();
+    const info = detalhes.dados;
 
-    const nome = info?.ultimoStatus?.nomeEleitoral || deputado.nome;
-    const partido = info?.ultimoStatus?.siglaPartido || "—";
-    const uf = info?.ultimoStatus?.siglaUf || "—";
-    const email = info?.ultimoStatus?.gabinete?.email || "—";
+    const nome = info.ultimoStatus.nomeEleitoral;
+    const partido = info.ultimoStatus.siglaPartido;
+    const uf = info.ultimoStatus.siglaUf;
+    const email = info.ultimoStatus.gabinete?.email || "—";
+    // FIM
 
-    // --- 3) Cota Parlamentar ---
-    const despResp = await fetch(
-      `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=2000`
+    // INÍCIO — Salário oficial do deputado (Câmara)
+    const salResp = await fetch(
+      `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/remuneracao`
     );
-    const despJson = await despResp.json();
+    const salJson = await salResp.json();
 
-    const despesas = despJson.dados || [];
-    const soma = despesas.reduce((s, d) => s + (d.valorLiquido || 0), 0);
+    let salarioBruto = 0;
+    let salarioLiquido = 0;
 
-    const totalBR = soma.toLocaleString("pt-BR", {
+    if (salJson?.dados?.length) {
+      const ultimo = salJson.dados[0];
+      salarioBruto = ultimo.remuneracaoBasicaBruta || 0;
+      salarioLiquido = ultimo.valorTotalLiquido || 0;
+    }
+
+    const brutoBR = salarioBruto.toLocaleString("pt-BR", {
       style: "currency",
       currency: "BRL",
     });
 
-    // Top fornecedores
+    const liquidoBR = salarioLiquido.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+
+    const salarioMandato = salarioBruto * 48;
+    const salarioMandatoBR = salarioMandato.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+    // FIM
+
+    // INÍCIO — Cota Parlamentar
+    const respDesp = await fetch(
+      `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=2000`
+    );
+    const despJson = await respDesp.json();
+
+    const despesas = despJson.dados || [];
+
+    const totalCota = despesas.reduce(
+      (s, d) => s + (d.valorLiquido || 0),
+      0
+    );
+
+    const totalCotaBR = totalCota.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+
+    // média por mês
+    const mesesDeMandato = Math.max(
+      1,
+      Math.ceil(
+        (Date.now() - new Date(info.ultimoStatus.dataInicio)) /
+          (1000 * 60 * 60 * 24 * 30)
+      )
+    );
+
+    const mediaMensal = totalCota / mesesDeMandato;
+    const mediaMensalBR = mediaMensal.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+
+    const projetado4Anos = mediaMensal * 48;
+    const projetado4AnosBR = projetado4Anos.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+    // FIM
+
+    // INÍCIO — Top fornecedores e cruzamento CGU
     const fornecedores = {};
+
     for (const d of despesas) {
       if (!d.cnpjCpfFornecedor) continue;
+
       if (!fornecedores[d.cnpjCpfFornecedor]) {
         fornecedores[d.cnpjCpfFornecedor] = {
           nome: d.nomeFornecedor,
           total: 0,
         };
       }
+
       fornecedores[d.cnpjCpfFornecedor].total += d.valorLiquido || 0;
     }
 
     const topFornecedores = Object.entries(fornecedores)
       .sort((a, b) => b[1].total - a[1].total)
-      .slice(0, 3);
+      .slice(0, 5);
 
-    // --- 4) PEPs (CGU) ---
-    const peps = await cguGet(
-      `peps?nome=${encodeURIComponent(info.ultimoStatus.nome)}&pagina=1`
-    );
+    const fornecedoresAnalisados = [];
 
-    const cargoAtual = peps.find((p) =>
-      p.descricao_funcao.toLowerCase().includes("deput")
-    );
+    for (const [cnpj, infoForn] of topFornecedores) {
+      const sancoes = await checarSancoesFornecedor(cnpj);
+      const financeiro = await checarFavorecidoUniao(cnpj);
 
-    // --- 5) Checagens de fornecedores (CEIS, CNEP, CEAF, etc.) ---
-    const alertas = [];
-
-    for (const [cnpj, dados] of topFornecedores) {
-      const sancoes = await checarSancoes(cnpj);
-      const favorecido = await checarFavorecido(cnpj);
-
-      let flags = [];
-
-      if (sancoes.ceis) flags.push("🚨 CEIS");
-      if (sancoes.cnep) flags.push("⚠️ CNEP");
-      if (sancoes.ceaf) flags.push("❌ CEAF");
-      if (favorecido?.favorecidoDespesas) flags.push("🟦 Recebe da União");
-      if (favorecido?.convenios) flags.push("📄 Convênios");
-      if (favorecido?.sancionadoCEPIM) flags.push("❗ CEPIM");
-
-      alertas.push({
+      fornecedoresAnalisados.push({
         cnpj,
-        nome: dados.nome,
-        total: dados.total,
-        flags,
+        nome: infoForn.nome,
+        total: infoForn.total,
+        sancoes,
+        financeiro,
       });
     }
+    // FIM
 
-    // MONTA TEXTO FINAL:
-    let txtFornecedores = "";
-    for (const f of alertas) {
-      const valor = f.total.toLocaleString("pt-BR", {
+    // INÍCIO — PEPs (cargo público)
+    const peps = await cguGet(
+      `peps?nome=${encodeURIComponent(info.ultimoStatus.nome)}&pagina=1`
+    ).catch(() => []);
+
+    const cargoAtual =
+      peps.find((p) =>
+        p.descricao_funcao.toLowerCase().includes("deput")
+      ) || null;
+    // FIM
+
+    // INÍCIO — Montagem final do relatório
+    let fornecedoresTxt = "";
+
+    for (const f of fornecedoresAnalisados) {
+      const totalBR = f.total.toLocaleString("pt-BR", {
         style: "currency",
         currency: "BRL",
       });
 
-      txtFornecedores += `\n• *${f.nome}* (${f.cnpj}) — ${valor}`;
-      if (f.flags.length) txtFornecedores += `\n  ${f.flags.join(" | ")}\n`;
+      const flags = [];
+      if (f.sancoes.ceis) flags.push("🚨 CEIS");
+      if (f.sancoes.cnep) flags.push("⚠️ CNEP");
+      if (f.sancoes.ceaf) flags.push("❌ CEAF");
+      if (f.sancoes.cepim) flags.push("❗ CEPIM");
+
+      if (f.financeiro?.totalFederal > 0)
+        flags.push(`🟦 Recebeu da União: R$ ${f.financeiro.totalFederal}`);
+
+      fornecedoresTxt += `\n• *${f.nome}* (${f.cnpj}) — ${totalBR}`;
+      if (flags.length) fornecedoresTxt += `\n  ${flags.join(" | ")}\n`;
     }
+
+    const custoTotalMandato =
+      salarioMandato + projetado4Anos + totalCota;
+
+    const custoTotalMandatoBR = custoTotalMandato.toLocaleString(
+      "pt-BR",
+      {
+        style: "currency",
+        currency: "BRL",
+      }
+    );
 
     const resposta = `
 🕵️ *Zeffa investigou ${nome}:*
@@ -181,32 +261,47 @@ export async function cmdDeputado(sock, msg, args) {
 
 ━━━━━━━━━━━━━━━━━━
 📌 *CARGO ATUAL (PEP – CGU)*
-• ${cargoAtual?.descricao_funcao || "Não encontrado"}
-• Órgão: ${cargoAtual?.nome_orgao || "—"}
+• ${cargoAtual?.descricao_funcao || "Deputado Federal"}
+• Órgão: ${
+      cargoAtual?.nome_orgao || "Câmara dos Deputados"
+    }
 
-📌 *INFORMAÇÕES DO GABINETE*
-• E-mail: ${email}
+━━━━━━━━━━━━━━━━━━
+📌 *REMUNERAÇÃO*
+• Bruto mensal: ${brutoBR}
+• Líquido mensal: ${liquidoBR}
+• Total bruto no mandato: ${salarioMandatoBR}
 
-📌 *GASTOS DE COTA PARLAMENTAR*
-• Total gasto: ${totalBR}
-• Top fornecedores:
-${txtFornecedores || "—"}
+━━━━━━━━━━━━━━━━━━
+📌 *COTA PARLAMENTAR*
+• Total gasto até agora: ${totalCotaBR}
+• Média mensal: ${mediaMensalBR}
+• Projeção 4 anos: ${projetado4AnosBR}
 
+━━━━━━━━━━━━━━━━━━
+📌 *FORNECEDORES DO MANDATO*
+${fornecedoresTxt || "—"}
+
+━━━━━━━━━━━━━━━━━━
+💰 *CUSTO TOTAL ESTIMADO DO MANDATO*
+👉 ${custoTotalMandatoBR}
+
+━━━━━━━━━━━━━━━━━━
 📌 *FONTES*
 • Câmara dos Deputados  
 • CGU – Portal da Transparência  
 • CEIS / CNEP / CEAF / CEPIM
 
-🔥 *Zeffa te entregou tudo. Sem massagem.*
+🔥 *Zeffa te entregou a capivara suprema.*
 `;
 
     await sock.sendMessage(msg.from, { text: resposta });
 
+    // FIM — Função principal
   } catch (e) {
-    console.error("❌ Erro no cmdDeputado:", e);
+    console.error("❌ Erro cmdDeputado:", e);
     await sock.sendMessage(msg.from, {
-      text: "❌ Erro ao investigar o deputado.",
+      text: "❌ Erro ao puxar a capivara completa.",
     });
   }
 }
-// FIM
