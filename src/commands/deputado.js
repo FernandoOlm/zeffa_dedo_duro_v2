@@ -182,23 +182,30 @@ export async function cmdDeputado(sock, jid, args) {
 
     // 6) Cartão corporativo
     await status(sock, jid, "💳 Checando cartão corporativo...");
-    const vinculosCC = [];
+const vinculosCC = [];
 
-    for (const [cnpj, valor] of ceap.top) {
-      const dados = await consultaCartaoPorCNPJ(cnpj, CGU_KEY);
-      if (dados.length) {
-        vinculosCC.push({ cnpj, valor, qtd: dados.length });
-      }
-    }
+for (const f of ceap.top) {
+  const dados = await consultaCartaoPorCNPJ(f.cnpj, CGU_KEY);
+  if (dados.length) {
+    vinculosCC.push({
+      cnpj: f.cnpj,
+      valor: f.total,
+      qtd: dados.length
+    });
+  }
+}
 
     // 7) Sanções
     await status(sock, jid, "⚠️ Checando CEIS / CNEP / CEAF / CEPIM...");
-    const fornecedoresSanções = [];
+const fornecedoresSanções = [];
 
-    for (const [cnpj] of ceap.top) {
-      const flags = await verificaSancoes(cnpj, CGU_KEY);
-      fornecedoresSanções.push({ cnpj, ...flags });
-    }
+for (const f of ceap.top) {
+  const flags = await verificaSancoes(f.cnpj, CGU_KEY);
+  fornecedoresSanções.push({
+    cnpj: f.cnpj,
+    ...flags
+  });
+}
 
     // ============================ MONTAR RESPOSTA ============================
     let txt = `🕵️ *Zeffa investigou ${nome}:*\n(${partido} - ${uf})\n\n`;
