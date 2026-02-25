@@ -262,7 +262,7 @@ async function startBot_Unique01() {
     if (qr) qrcode.generate(qr, { small: true });
 
     if (connection === "open") {
-      console.log(C.green + "🔥 Ferdinando conectado!" + C.reset);
+      console.log(C.green + "🔥 Zeffa Dedo Duro conectado!" + C.reset);
     }
 
     if (connection === "close") {
