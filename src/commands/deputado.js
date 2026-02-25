@@ -1,316 +1,152 @@
-// INÍCIO — Importações
+// INÍCIO — deputado.js FULL MODE
 import fetch from "node-fetch";
-import dotenv from "dotenv";
-dotenv.config();
-// FIM
+import { scrapeRemuneracao } from "../utils/scraperRemuneracao.js";
+import { scrapeGabinete } from "../utils/scraperGabinete.js";
+import { pegaEmendas } from "../utils/emendas.js";
+import { consultaCartaoPorCNPJ } from "../utils/cartaoVinculos.js";
 
-const CGU_KEY = process.env.CGU_API_KEY;
-
-// INÍCIO — Helper CGU (GET)
-async function cguGet(endpoint) {
-  const url = `https://api.portaldatransparencia.gov.br/api-de-dados/${endpoint}`;
-
-  const resp = await fetch(url, {
-    headers: {
-      "chave-api-dados": CGU_KEY,
-      Accept: "application/json",
-    },
-  });
-
-  if (!resp.ok) {
-    throw new Error(`Erro CGU: ${resp.status} — ${url}`);
-  }
-
-  return await resp.json();
-}
-// FIM
-
-// INÍCIO — Checar sanções CEIS/CNEP/CEAF/CEPIM
-async function checarSancoesFornecedor(cnpj) {
-  const ceis = await cguGet(`ceis?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
-  const cnep = await cguGet(`cnep?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
-  const ceaf = await cguGet(`ceaf?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
-  const cepim = await cguGet(`cepim?cpfCnpj=${cnpj}&pagina=1`).catch(() => []);
-
-  return {
-    ceis: ceis.length,
-    cnep: cnep.length,
-    ceaf: ceaf.length,
-    cepim: cepim.length,
-  };
-}
-// FIM
-
-// INÍCIO — Checar fornecedor: valores recebidos da União
-async function checarFavorecidoUniao(cnpj) {
-  const dados = await cguGet(
-    `pessoas-juridicas?cpfCnpj=${cnpj}&pagina=1`
-  ).catch(() => []);
-
-  if (!dados.length) return null;
-
-  const pj = dados[0];
-
-  return {
-    nome: pj.razaoSocial,
-    totalFederal: pj.favorecidoDespesas || 0,
-    possuiContratos: pj.possuiContratacao || false,
-    convenios: pj.convenios || false,
-    sancionadoCEPIM: pj.sancionadoCEPIM || false,
-  };
-}
-// FIM
-
-// INÍCIO — Função principal do comando
-export async function cmdDeputado(sock, msg, args) {
+export async function cmdDeputado(sock, jid, nomeBuscado) {
   try {
-    const nomeBusca = args.join(" ").trim();
-    if (!nomeBusca) {
-      await sock.sendMessage(msg.from, {
-        text: "Digite o nome do deputado: !deputado fulano",
-      });
+    // Aviso inicial
+    await sock.sendMessage(jid, { text: `🔍 *OK! Investigando o deputado ${nomeBuscado}...*\nIsso pode levar alguns segundos.` });
+
+    // Log
+    console.log("📥 Buscando deputado:", nomeBuscado);
+
+    // 1) BUSCAR DEPUTADO
+    await sock.sendMessage(jid, { text: "👤 Buscando dados básicos do deputado..." });
+
+    const resp = await fetch(`https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(nomeBuscado)}`);
+    const data = await resp.json();
+
+    if (!data.dados.length) {
+      await sock.sendMessage(jid, { text: "❌ Nenhum deputado encontrado com esse nome." });
       return;
     }
 
-    // INÍCIO — Busca inicial na Câmara
-    const urlBusca = `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(
-      nomeBusca
-    )}`;
-    const respBusca = await fetch(urlBusca);
-    const dadosBusca = await respBusca.json();
+    const dep = data.dados[0];
+    const id = dep.id;
 
-    if (!dadosBusca?.dados?.length) {
-      await sock.sendMessage(msg.from, {
-        text: `Nenhum deputado encontrado com: *${nomeBusca}*`,
-      });
-      return;
-    }
+    // Buscar mais detalhes
+    const detResp = await fetch(`https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`);
+    const detJson = await detResp.json();
+    const info = detJson.dados;
 
-    const deputado = dadosBusca.dados[0];
-    const id = deputado.id;
-    // FIM
-
-    // INÍCIO — Detalhes pessoais
-    const respDetalhes = await fetch(
-      `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`
-    );
-    const detalhes = await respDetalhes.json();
-    const info = detalhes.dados;
-
-    const nome = info.ultimoStatus.nomeEleitoral;
     const partido = info.ultimoStatus.siglaPartido;
     const uf = info.ultimoStatus.siglaUf;
-    const email = info.ultimoStatus.gabinete?.email || "—";
-    // FIM
+    const email = info.ultimoStatus.gabinete?.email || "Não informado";
 
-    // INÍCIO — Salário oficial do deputado (corrigido)
-const agora = new Date();
-const ano = agora.getFullYear();
-const mes = agora.getMonth() + 1;
+    // 2) SCRAPER SALÁRIO
+    await sock.sendMessage(jid, { text: "💰 Coletando salário oficial (scraping)..." });
 
-const salResp = await fetch(
-  `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/remuneracao?ano=${ano}&mes=${mes}`
-);
+    const salario = await scrapeRemuneracao(id);
 
-const salJson = await salResp.json();
+    const salarioBruto = salario.salarioBruto || "Indisponível";
+    const salarioLiquido = salario.salarioLiquido || "Indisponível";
 
-let salarioBruto = 50; // valor oficial fixo
-let salarioLiquido = 0;
+    // 3) GABINETE (ASSESSORES)
+    await sock.sendMessage(jid, { text: "👥 Consultando assessores do gabinete..." });
 
-if (salJson?.dados?.length) {
-  const ultimo = salJson.dados[0];
+    const gabinete = await scrapeGabinete(id);
 
-  if (ultimo.remuneracaoBasicaBruta > 0)
-    salarioBruto = ultimo.remuneracaoBasicaBruta;
+    // 4) EMENDAS PARLAMENTARES
+    await sock.sendMessage(jid, { text: "📑 Coletando emendas parlamentares..." });
 
-  if (ultimo.valorTotalLiquido > 0)
-    salarioLiquido = ultimo.valorTotalLiquido;
-}
+    const emendas = await pegaEmendas(id);
 
-const brutoBR = salarioBruto.toLocaleString("pt-BR", {
-  style: "currency",
-  currency: "BRL",
-});
+    const totalEmendas = emendas.reduce((s, e) => s + (e.valorAutorizado || 0), 0);
+    const totalPagas = emendas.reduce((s, e) => s + (e.valorPago || 0), 0);
 
-const liquidoBR = salarioLiquido.toLocaleString("pt-BR", {
-  style: "currency",
-  currency: "BRL",
-});
+    // 5) CEAP — DESPESAS DO MANDATO
+    await sock.sendMessage(jid, { text: "📦 Baixando despesas do mandato (CEAP)..." });
 
-const salarioMandato = salarioBruto * 48;
-
-const salarioMandatoBR = salarioMandato.toLocaleString("pt-BR", {
-  style: "currency",
-  currency: "BRL",
-});
-// FIM
-    // INÍCIO — Cota Parlamentar
-    const respDesp = await fetch(
-      `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=2000`
+    const ceapResp = await fetch(
+      `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?ano=2024&pagina=1`
     );
-    const despJson = await respDesp.json();
+    const ceapJson = await ceapResp.json();
 
-    const despesas = despJson.dados || [];
+    const despesas = ceapJson.dados || [];
+    const totalCEAP = despesas.reduce((s, d) => s + d.valorDocumento, 0);
 
-    const totalCota = despesas.reduce(
-      (s, d) => s + (d.valorLiquido || 0),
-      0
-    );
-
-    const totalCotaBR = totalCota.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-
-    // média por mês
-    const mesesDeMandato = Math.max(
-      1,
-      Math.ceil(
-        (Date.now() - new Date(info.ultimoStatus.dataInicio)) /
-          (1000 * 60 * 60 * 24 * 30)
-      )
-    );
-
-    const mediaMensal = totalCota / mesesDeMandato;
-    const mediaMensalBR = mediaMensal.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-
-    const projetado4Anos = mediaMensal * 48;
-    const projetado4AnosBR = projetado4Anos.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-    // FIM
-
-    // INÍCIO — Top fornecedores e cruzamento CGU
+    // Top fornecedores
     const fornecedores = {};
-
     for (const d of despesas) {
-      if (!d.cnpjCpfFornecedor) continue;
-
-      if (!fornecedores[d.cnpjCpfFornecedor]) {
-        fornecedores[d.cnpjCpfFornecedor] = {
-          nome: d.nomeFornecedor,
-          total: 0,
-        };
-      }
-
-      fornecedores[d.cnpjCpfFornecedor].total += d.valorLiquido || 0;
+      if (!fornecedores[d.cnpjCpfFornecedor]) fornecedores[d.cnpjCpfFornecedor] = 0;
+      fornecedores[d.cnpjCpfFornecedor] += d.valorDocumento;
     }
 
     const topFornecedores = Object.entries(fornecedores)
-      .sort((a, b) => b[1].total - a[1].total)
+      .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    const fornecedoresAnalisados = [];
+    // 6) CARTÃO CORPORATIVO — ligação indireta
+    await sock.sendMessage(jid, { text: "💳 Verificando fornecedores vinculados ao cartão corporativo..." });
 
-    for (const [cnpj, infoForn] of topFornecedores) {
-      const sancoes = await checarSancoesFornecedor(cnpj);
-      const financeiro = await checarFavorecidoUniao(cnpj);
+    const CGU_KEY = process.env.CGU_API_KEY;
 
-      fornecedoresAnalisados.push({
-        cnpj,
-        nome: infoForn.nome,
-        total: infoForn.total,
-        sancoes,
-        financeiro,
-      });
-    }
-    // FIM
+    const vinculosCC = [];
 
-    // INÍCIO — PEPs (cargo público)
-    const peps = await cguGet(
-      `peps?nome=${encodeURIComponent(info.ultimoStatus.nome)}&pagina=1`
-    ).catch(() => []);
-
-    const cargoAtual =
-      peps.find((p) =>
-        p.descricao_funcao.toLowerCase().includes("deput")
-      ) || null;
-    // FIM
-
-    // INÍCIO — Montagem final do relatório
-    let fornecedoresTxt = "";
-
-    for (const f of fornecedoresAnalisados) {
-      const totalBR = f.total.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      });
-
-      const flags = [];
-      if (f.sancoes.ceis) flags.push("🚨 CEIS");
-      if (f.sancoes.cnep) flags.push("⚠️ CNEP");
-      if (f.sancoes.ceaf) flags.push("❌ CEAF");
-      if (f.sancoes.cepim) flags.push("❗ CEPIM");
-
-      if (f.financeiro?.totalFederal > 0)
-        flags.push(`🟦 Recebeu da União: R$ ${f.financeiro.totalFederal}`);
-
-      fornecedoresTxt += `\n• *${f.nome}* (${f.cnpj}) — ${totalBR}`;
-      if (flags.length) fornecedoresTxt += `\n  ${flags.join(" | ")}\n`;
-    }
-
-    const custoTotalMandato =
-      salarioMandato + projetado4Anos + totalCota;
-
-    const custoTotalMandatoBR = custoTotalMandato.toLocaleString(
-      "pt-BR",
-      {
-        style: "currency",
-        currency: "BRL",
+    for (const [cnpj, valor] of topFornecedores) {
+      const dados = await consultaCartaoPorCNPJ(cnpj, CGU_KEY);
+      if (dados.length) {
+        vinculosCC.push({
+          cnpj,
+          valor,
+          registros: dados.length
+        });
       }
-    );
-
-    const resposta = `
-🕵️ *Zeffa investigou ${nome}:*
-(${partido} - ${uf})
-
-━━━━━━━━━━━━━━━━━━
-📌 *CARGO ATUAL (PEP – CGU)*
-• ${cargoAtual?.descricao_funcao || "Deputado Federal"}
-• Órgão: ${
-      cargoAtual?.nome_orgao || "Câmara dos Deputados"
     }
 
-━━━━━━━━━━━━━━━━━━
-📌 *REMUNERAÇÃO*
-• Bruto mensal: ${brutoBR}
-• Líquido mensal: ${liquidoBR}
-• Total bruto no mandato: ${salarioMandatoBR}
+    // 7) MONTAR MENSAGEM FINAL
+    let resposta = `🕵️ *Zeffa investigou ${info.nomeCivil}:*\n(${partido} - ${uf})\n\n`;
 
-━━━━━━━━━━━━━━━━━━
-📌 *COTA PARLAMENTAR*
-• Total gasto até agora: ${totalCotaBR}
-• Média mensal: ${mediaMensalBR}
-• Projeção 4 anos: ${projetado4AnosBR}
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += `📌 *CARGO ATUAL*\n• ${info.ultimoStatus.cargo} \n• Órgão: Câmara dos Deputados\n\n`;
 
-━━━━━━━━━━━━━━━━━━
-📌 *FORNECEDORES DO MANDATO*
-${fornecedoresTxt || "—"}
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += `📌 *REMUNERAÇÃO (Scraping)*\n• Bruto mensal: ${salarioBruto}\n• Líquido mensal: ${salarioLiquido}\n\n`;
 
-━━━━━━━━━━━━━━━━━━
-💰 *CUSTO TOTAL ESTIMADO DO MANDATO*
-👉 ${custoTotalMandatoBR}
-
-━━━━━━━━━━━━━━━━━━
-📌 *FONTES*
-• Câmara dos Deputados  
-• CGU – Portal da Transparência  
-• CEIS / CNEP / CEAF / CEPIM
-
-🔥 *Zeffa te entregou a capivara suprema.*
-`;
-
-    await sock.sendMessage(msg.from, { text: resposta });
-
-    // FIM — Função principal
-  } catch (e) {
-    console.error("❌ Erro cmdDeputado:", e);
-    await sock.sendMessage(msg.from, {
-      text: "❌ Erro ao puxar a capivara completa.",
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += `📌 *VERBA DE GABINETE (Assesores)*\n• Total de assessores: ${gabinete.length}\n`;
+    gabinete.slice(0, 5).forEach(a => {
+      resposta += `• ${a.nome} — ${a.cargo} — ${a.remuneracao}\n`;
     });
+    resposta += gabinete.length > 5 ? "• …e mais.\n\n" : "\n";
+
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += `📌 *EMENDAS PARLAMENTARES*\n• Total autorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\n• Total pago: R$ ${totalPagas.toLocaleString("pt-BR")}\n`;
+    resposta += `• Emendas encontradas: ${emendas.length}\n\n`;
+
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += `📌 *COTA PARLAMENTAR (CEAP)*\n• Total gasto em 2024: R$ ${totalCEAP.toLocaleString("pt-BR")}\n\n`;
+
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += "📌 *TOP FORNECEDORES*\n";
+    for (const [cnpj, valor] of topFornecedores) {
+      resposta += `• ${cnpj} — R$ ${valor.toLocaleString("pt-BR")}\n`;
+    }
+    resposta += "\n";
+
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += "💳 *Vínculos com Cartão Corporativo*\n";
+    if (!vinculosCC.length) {
+      resposta += "Nenhum fornecedor vinculado ao cartão corporativo.\n\n";
+    } else {
+      vinculosCC.forEach(v => {
+        resposta += `• ${v.cnpj} — ${v.registros} registros no cartão corporativo\n`;
+      });
+      resposta += "\n";
+    }
+
+    resposta += "━━━━━━━━━━━━━━━━━━\n";
+    resposta += "📌 *FONTES*\n• Câmara dos Deputados\n• CGU — Portal da Transparência\n• Senado — SigaBrasil\n• CEIS / CNEP / CEAF / CEPIM\n\n";
+
+    resposta += "🔥 *Zeffa te entregou a capivara FULL MODE.*";
+
+    await sock.sendMessage(jid, { text: resposta });
+  } catch (err) {
+    console.error("❌ Erro no cmdDeputado:", err);
+    await sock.sendMessage(jid, { text: "❌ Erro interno ao gerar a capivara." });
   }
 }
+// FIM — deputado.js FULL MODE
