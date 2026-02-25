@@ -29,6 +29,15 @@ export async function cmdDeputado(sock, msg, args) {
 
         console.log("🆔 ID encontrado:", id);
 
+        // 🔥 ADICIONADO: puxar partido e UF do deputado
+        const urlDetalhes = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`;
+        const respDetalhes = await fetch(urlDetalhes);
+        const dadosDet = await respDetalhes.json();
+
+        const ultimoStatus = dadosDet?.dados?.ultimoStatus || {};
+        const partido = ultimoStatus.siglaPartido || "—";
+        const uf = ultimoStatus.siglaUf || "—";
+
         // INÍCIO — Buscar despesas
         const urlDespesas = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=1000`;
         const respDespesas = await fetch(urlDespesas);
@@ -83,6 +92,9 @@ export async function cmdDeputado(sock, msg, args) {
         const resposta = `
 🕵️ *Zeffa Dedo Duro investigou ${deputado.nome}:*
 ━━━━━━━━━━━━━━━━━━
+
+🏛️ *Partido:* ${partido}
+📍 *Estado:* ${uf}
 
 📌 *IMPORTANTE*  
 Este relatório mostra **apenas a COTA PARLAMENTAR**, que são *gastos reembolsáveis*.  
