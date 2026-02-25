@@ -109,7 +109,7 @@ async function cguGet_v7_Full(url) {
 
 
 // INÍCIO — Função principal do comando !deputado
-export default async function cmdDeputado(sock, jid, nomeDeputado) {
+export async function cmdDeputado(sock, jid, nomeDeputado) {
   try {
     // status inicial
     await sock.sendMessage(jid, { text: `🔍 Pesquisando deputado *${nomeDeputado}*...` });
