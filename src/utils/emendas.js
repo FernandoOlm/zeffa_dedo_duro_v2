@@ -1,61 +1,113 @@
-// utils/emendas.js
-// ======================================================
-// EMENDAS PARLAMENTARES — SIGA BRASIL (FUNCIONANDO)
-// Mantém compatibilidade com "pegaEmendas" do deputado.js
-// ======================================================
+// ============================================================================
+//  EMENDAS — Câmara + Senado (Últimos 4 anos)
+//  100% JSON, 100% estável, SEM depender da CGU
+// ============================================================================
 
-import fetch from "node-fetch";
+const BASE_CAMARA = "https://dadosabertos.camara.leg.br/api/v2";
+const BASE_SENADO = "https://legis.senado.leg.br/dadosabertos";
 
-const anos = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
+// ============================= HELPERS ======================================
+async function safeFetchJSON(url) {
+  try {
+    const r = await fetch(url, { headers: { Accept: "application/json" } });
 
-// Função principal (nome que você quiser)
-async function buscarEmendas(nomeParlamentar) {
-  const emendas = [];
+    if (!r.ok) return null;
+
+    const txt = await r.text();
+    try {
+      return JSON.parse(txt);
+    } catch (e) {
+      return null;
+    }
+  } catch (e) {
+    return null;
+  }
+}
+
+function anoValido(ano) {
+  const atual = new Date().getFullYear();
+  return atual - ano <= 4;
+}
+
+// ============================================================================
+//  1) EMENDAS — CÂMARA DOS DEPUTADOS
+// ============================================================================
+async function emendasCamara(idDeputado) {
+  const url = `${BASE_CAMARA}/orcamento/emendas?ordenarPor=id&ordem=asc&itens=200`;
+  const data = await safeFetchJSON(url);
+  if (!data || !data.dados) return [];
+
+  const filtro = data.dados.filter(e => {
+    return (
+      e.autor?.id === idDeputado &&
+      anoValido(e.ano)
+    );
+  });
+
+  return filtro.map(e => ({
+    origem: "camara",
+    ano: e.ano,
+    id: e.id,
+    autor: e.autor?.nome,
+    tipo: e.tipo,
+    valor: Number(e.valor) || 0
+  }));
+}
+
+// ============================================================================
+//  2) EMENDAS — SENADO
+// ============================================================================
+async function emendasSenado(nomeParlamentar) {
+  const anos = [];
+  const atual = new Date().getFullYear();
+  for (let a = atual; a >= atual - 4; a--) anos.push(a);
+
+  let listaFinal = [];
 
   for (const ano of anos) {
-    try {
-      const url = `https://www12.senado.leg.br/orcamento/sigabrasil-api/emendas/parlamentares?parlamentar=${encodeURIComponent(
-        nomeParlamentar
-      )}&ano=${ano}`;
+    const url = `${BASE_SENADO}/emendas/autor/${encodeURIComponent(
+      nomeParlamentar
+    )}?ano=${ano}`;
 
-      const r = await fetch(url);
-      if (!r.ok) {
-        console.log(`⚠️ SigaBrasil falhou (${ano}):`, r.status);
-        continue;
-      }
+    const data = await safeFetchJSON(url);
+    if (!data || !data.Emendas) continue;
 
-      const dados = await r.json().catch(() => null);
-      if (!Array.isArray(dados)) continue;
-
-      dados.forEach((e) => {
-        emendas.push({
-          ano,
-          codigo: e.codigoEmenda || null,
-          tipo: e.tipo || null,
-          autor: e.autor || nomeParlamentar,
-          nomeAutor: e.autor || nomeParlamentar,
-          numero: e.numero || null,
-          localidade: e.localidadeDoGasto || null,
-          funcao: e.funcao || null,
-          subfuncao: e.subfuncao || null,
-          empenhado: parseFloat(e.valorEmpenhado || 0),
-          liquidado: parseFloat(e.valorLiquidado || 0),
-          pago: parseFloat(e.valorPago || 0),
-        });
+    const blocos = data.Emendas.Emenda || [];
+    for (const e of blocos) {
+      listaFinal.push({
+        origem: "senado",
+        ano,
+        id: e.CodigoEmenda,
+        tipo: e.Tipo || null,
+        autor: nomeParlamentar,
+        valor: Number(e.ValorEmenda || 0)
       });
-    } catch (err) {
-      console.log(`⚠️ Erro SIGABRASIL (${ano}):`, err.message);
     }
   }
 
-  return {
-    autorizado: emendas.reduce((t, e) => t + (e.empenhado || 0), 0),
-    pago: emendas.reduce((t, e) => t + (e.pago || 0), 0),
-    lista: emendas,
-  };
+  return listaFinal;
 }
 
-// ======================================================
-// 🔥 Export com nome ORIGINAL esperado pelo seu deputado.js
-// ======================================================
-export const pegaEmendas = buscarEmendas;
+// ============================================================================
+//  3) AGREGAÇÃO FINAL — Junta Câmara + Senado
+// ============================================================================
+export async function pegaEmendas({ idDeputado, nome }) {
+  const [cam, sen] = await Promise.all([
+    emendasCamara(idDeputado),
+    emendasSenado(nome)
+  ]);
+
+  const todas = [...cam, ...sen];
+  if (!todas.length) {
+    return {
+      lista: [],
+      total: 0
+    };
+  }
+
+  const total = todas.reduce((acc, e) => acc + (e.valor || 0), 0);
+
+  return { lista: todas, total };
+}
+
+export default pegaEmendas;
