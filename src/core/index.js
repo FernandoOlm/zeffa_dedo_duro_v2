@@ -23,19 +23,20 @@ async function startBot() {
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", ({ connection }) => {
-    if (connection === "open") console.log("🔥 Bot conectado!");
+    if (connection === "open") console.log("🔥 Zeffa conectado!");
     if (connection === "close") {
       console.log("❌ Caiu — reconectando...");
       startBot();
     }
   });
 
+  // 📩 RECEBER MENSAGENS
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
     if (!msg?.message) return;
     if (msg.key.fromMe) return;
 
-    const jid = msg.key.remoteJid;
+    const from = msg.key.remoteJid;
     const texto =
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
@@ -43,25 +44,20 @@ async function startBot() {
 
     console.log("📥 Mensagem:", texto);
 
-    // --- comando !ping ---
-    if (texto.startsWith("!ping")) {
-      const resposta = await comandoPing();
-      await sock.sendMessage(jid, { text: resposta });
+    // Separar comando + argumentos
+    const partes = texto.trim().split(" ");
+    const comando = partes.shift()?.toLowerCase();  // !deputado
+    const args = partes || [];                      // ["nikolas","ferreira"]
+
+    // 🔔 !ping
+    if (comando === "!ping") {
+      await comandoPing(sock, { from, texto });
       return;
     }
 
-    // --- comando !deputado <nome> ---
-    if (texto.startsWith("!deputado")) {
-      const nome = texto.replace("!deputado", "").trim();
-      if (!nome) {
-        await sock.sendMessage(jid, { text: "Use: !deputado NOME" });
-        return;
-      }
-
-      await sock.sendMessage(jid, { text: `🔎 Buscando deputado: *${nome}*` });
-
-      const resposta = await cmdDeputado(nome);
-      await sock.sendMessage(jid, { text: resposta });
+    // 🏛️ !deputado nome
+    if (comando === "!deputado") {
+      await cmdDeputado(sock, { from, texto }, args);
       return;
     }
   });
