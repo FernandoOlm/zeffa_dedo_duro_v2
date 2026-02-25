@@ -1,79 +1,88 @@
-// INÍCIO — senador.js (FUNCIONANDO + PARTIDO)
+// INÍCIO — senador.js (API NOVA 100% JSON)
 import fetch from "node-fetch";
 
-export async function cmdSenador(sock, { from, texto }, args = []) {
-  try {
-    const nome = args.join(" ").trim();
-    if (!nome) {
-      await sock.sendMessage(from, { text: "❗ Use: *!senador nome*" });
-      return;
-    }
+export async function cmdSenador(sock, { from }, args = []) {
+    try {
+        const nome = args.join(" ").trim();
+        if (!nome) {
+            await sock.sendMessage(from, { text: "❗ Use: *!senador nome*" });
+            return;
+        }
 
-    // LISTA ATUAL — FORÇANDO JSON
-    const urlLista = "https://legis.senado.leg.br/dadosabertos/senador/lista/atual?formato=json";
-    const dados = await (await fetch(urlLista)).json();
+        // API NOVA — sempre JSON
+        const listaURL = "https://www.senado.leg.br/transparencia/lsv/senadores.json";
+        const dados = await (await fetch(listaURL)).json();
 
-    const lista = dados?.ListaSenador?.Senadores?.Senador || [];
+        const lista =
+            dados?.ListaParlamentarEmExercicio?.Parlamentares?.Parlamentar || [];
 
-    const senador = lista.find(s =>
-      s.IdentificacaoParlamentar.NomeParlamentar
-        .toLowerCase()
-        .includes(nome.toLowerCase())
-    );
+        // Fuzzy básico
+        const senador = lista.find(s =>
+            s.IdentificacaoParlamentar.NomeParlamentar
+                .toLowerCase()
+                .includes(nome.toLowerCase())
+        );
 
-    if (!senador) {
-      await sock.sendMessage(from, {
-        text: `❌ Nenhum senador encontrado parecido com: *${nome}*`
-      });
-      return;
-    }
+        if (!senador) {
+            await sock.sendMessage(from, {
+                text: `❌ Nenhum senador encontrado parecido com: *${nome}*`
+            });
+            return;
+        }
 
-    const id = senador.IdentificacaoParlamentar.CodigoParlamentar;
-    const nomeSen = senador.IdentificacaoParlamentar.NomeParlamentar;
-    const partido = senador.IdentificacaoParlamentar.SiglaPartidoParlamentar || "—";
-    const uf = senador.IdentificacaoParlamentar.UfParlamentar || "—";
+        const info = senador.IdentificacaoParlamentar;
+        const id = info.CodigoParlamentar;
+        const nomeSen = info.NomeParlamentar;
+        const partido = info.SiglaPartidoParlamentar;
+        const uf = info.UfParlamentar;
 
-    // DESPESAS — FORÇANDO JSON
-    const urlDesp = `https://legis.senado.leg.br/dadosabertos/senador/${id}/despesas?formato=json`;
-    const dadosDesp = await (await fetch(urlDesp)).json();
+        // 🔥 Despesas (API nova)
+        const urlDesp = `https://www.senado.leg.br/transparencia/lsv/despesa_ceaps_${id}.json`;
+        const dadosDesp = await (await fetch(urlDesp)).json();
 
-    const listaDesp =
-      dadosDesp?.DespesasParlamentares?.Despesas?.Despesas?.Despesa || [];
+        const despesas =
+            dadosDesp?.DetalhamentoDocumentoParlamentar?.Documentos?.Documento || [];
 
-    const total = listaDesp.reduce(
-      (acc, d) => acc + Number(d.ValorReembolsado || 0),
-      0
-    );
+        let total = 0;
+        const categorias = {};
 
-    let resposta = `
+        despesas.forEach(d => {
+            const val = Number(d?.ValorReembolsado || 0);
+            total += val;
+
+            const tipo = d?.TipoDespesa || "Outros";
+            categorias[tipo] = (categorias[tipo] || 0) + val;
+        });
+
+        const totalFormat = total.toLocaleString("pt-BR", {
+            style: "currency",
+            currency: "BRL"
+        });
+
+        let catTexto = "";
+        for (const c in categorias) {
+            const pct = ((categorias[c] / total) * 100).toFixed(1);
+            catTexto += `- ${c}: ${pct}%\n`;
+        }
+
+        const resposta = `
 🟦 *Zeffa investigou o Senador ${nomeSen}:*
 
-🏛️ *Partido:* ${partido}
-📍 *Estado:* ${uf}
+🏛️ Partido: ${partido}
+📍 Estado: ${uf}
 
-💸 *Total reembolsado:* R$ ${total.toFixed(2)}
+💸 Total reembolsado: ${totalFormat}
 
-📊 *Gastos por categoria:*
+📊 Gastos por categoria:
+${catTexto}
+
+📌 Fonte: Senado Federal — Transparência (API nova)
 `;
 
-    const categorias = {};
+        await sock.sendMessage(from, { text: resposta });
 
-    listaDesp.forEach(d => {
-      const cat = d.TipoDespesa || "Outros";
-      categorias[cat] = (categorias[cat] || 0) + Number(d.ValorReembolsado || 0);
-    });
-
-    for (const c in categorias) {
-      const pct = ((categorias[c] / total) * 100).toFixed(1);
-      resposta += `- ${c}: ${pct}%\n`;
+    } catch (e) {
+        console.error("Erro senador:", e);
+        await sock.sendMessage(from, { text: "❌ Erro ao consultar senador!" });
     }
-
-    resposta += `\n📌 *Fonte:* Dados Abertos do Senado`;
-
-    await sock.sendMessage(from, { text: resposta });
-
-  } catch (err) {
-    console.error("Erro senador:", err);
-    await sock.sendMessage(from, { text: "❌ Erro ao consultar senador!" });
-  }
 }
