@@ -1,149 +1,130 @@
+// INÍCIO — Importações
 import fetch from "node-fetch";
+// FIM
 
-// ==========================
-// Buscar deputado por nome
-// ==========================
-async function buscarDeputado(nome) {
-  const url = `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(nome)}`;
-  const r = await fetch(url);
-  const j = await r.json();
-  return j.dados?.[0] || null;
+// INÍCIO — Função principal
+export async function cmdDeputado(sock, msg, args) {
+    try {
+        const nomeBusca = args.join(" ").trim();
+        if (!nomeBusca) {
+            await sock.sendMessage(msg.from, { text: "Digite o nome: !deputado fulano" });
+            return;
+        }
+
+        console.log("🔍 Buscando deputado:", nomeBusca);
+
+        // INÍCIO — Buscar lista de deputados
+        const urlBusca = `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(nomeBusca)}`;
+        const respBusca = await fetch(urlBusca);
+        const dadosBusca = await respBusca.json();
+        // FIM
+
+        if (!dadosBusca?.dados?.length) {
+            await sock.sendMessage(msg.from, { text: `Nenhum deputado encontrado com o nome: *${nomeBusca}*` });
+            return;
+        }
+
+        const deputado = dadosBusca.dados[0];
+        const id = deputado.id;
+
+        console.log("🆔 ID encontrado:", id);
+
+        // INÍCIO — Buscar despesas
+        const urlDespesas = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=1000`;
+        const respDespesas = await fetch(urlDespesas);
+        const dadosDespesas = await respDespesas.json();
+        // FIM
+
+        const despesas = dadosDespesas?.dados || [];
+
+        if (despesas.length === 0) {
+            await sock.sendMessage(msg.from, { text: `Deputado *${deputado.nome}* não possui despesas registradas.` });
+            return;
+        }
+
+        // INÍCIO — Cálculos
+        const total = despesas.reduce((s, d) => s + (d.valorLiquido || 0), 0);
+
+        const fornecedorMap = {};
+        const categoriaMap = {};
+        const mesesMap = {};
+        const notasMap = {};
+
+        for (const d of despesas) {
+            const fornecedor = d.nomeFornecedor || "Desconhecido";
+            const categoria = d.tipoDocumento || "Outros";
+            const mes = d.mes || 0;
+            const chaveNota = `${d.numeroDocumento}-${d.dataDocumento}-${d.valorDocumento}`;
+
+            fornecedorMap[fornecedor] = (fornecedorMap[fornecedor] || 0) + d.valorLiquido;
+            categoriaMap[categoria] = (categoriaMap[categoria] || 0) + d.valorLiquido;
+            mesesMap[mes] = (mesesMap[mes] || 0) + d.valorLiquido;
+            notasMap[chaveNota] = (notasMap[chaveNota] || 0) + 1;
+        }
+
+        const fornecedorFav = Object.entries(fornecedorMap).sort((a, b) => b[1] - a[1])[0];
+        const mesTop = Object.entries(mesesMap).sort((a, b) => b[1] - a[1])[0];
+
+        const duplicadas = Object.entries(notasMap).filter(e => e[1] > 1).length;
+
+        const totalFormat = total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+        // Criar barras visuais da categoria
+        const categoriasFormatadas = Object.entries(categoriaMap)
+            .map(([nome, valor]) => {
+                const pct = ((valor / total) * 100).toFixed(1);
+                const barras = "█".repeat(Math.max(1, Math.round(pct / 5)));
+                return `${nome}: ${barras} ${pct}%`;
+            })
+            .join("\n");
+        // FIM cálculos
+
+        // INÍCIO — Montar mensagem
+        const resposta = `
+🕵️ *Zeffa Dedo Duro investigou ${deputado.nome}:*
+━━━━━━━━━━━━━━━━━━
+
+📌 *IMPORTANTE*  
+Este relatório mostra **apenas a COTA PARLAMENTAR**, que são *gastos reembolsáveis*.  
+**Não inclui salário, verba de gabinete, assessores, auxílio ou benefícios internos.**
+
+━━━━━━━━━━━━━━━━━━
+
+💸 *Total gasto no mandato:*  
+➡️ ${totalFormat}
+
+🧾 *Fornecedor favorito:*  
+➡️ ${fornecedorFav[0]}  
+➡️ Representa ${(fornecedorFav[1] / total * 100).toFixed(1)}% do total  
+➡️ Valor: ${fornecedorFav[1].toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+
+📆 *Mês mais gastador:*  
+➡️ ${mesTop[0]} — ${mesTop[1].toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+
+📄 *Notas duplicadas:*  
+➡️ ${duplicadas > 0 ? `${duplicadas} encontradas 👀` : "nenhuma ✔️"}
+
+━━━━━━━━━━━━━━━━━━
+📊 *Gastos por categoria:*  
+${categoriasFormatadas}
+━━━━━━━━━━━━━━━━━━
+
+📚 *Fontes oficiais:*  
+• Câmara dos Deputados — Dados Abertos  
+• https://dadosabertos.camara.leg.br  
+• Endpoints utilizados: */deputados* e */despesas*
+
+🔥 *Zeffa passou o pente fino. Nada escapou 😘*
+        `;
+        // FIM mensagem
+
+        // INÍCIO — enviar
+        await sock.sendMessage(msg.from, { text: resposta });
+        // FIM
+
+    } catch (e) {
+        console.error("❌ Erro no cmdDeputado:", e);
+        await sock.sendMessage(msg.from, { text: "❌ Erro ao analisar o deputado." });
+    }
 }
-
-// ==========================
-// Buscar TODAS despesas
-// ==========================
-async function buscarDespesas(id) {
-  const url = `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=1000`;
-  const r = await fetch(url);
-  const j = await r.json();
-  return j.dados || [];
-}
-
-// ==========================
-// Agrupar por categoria
-// ==========================
-function agruparCategorias(despesas) {
-  const mapa = {};
-
-  for (const d of despesas) {
-    const cat = d.tipoDocumento || "OUTROS";
-    if (!mapa[cat]) mapa[cat] = 0;
-    mapa[cat] += d.valorLiquido;
-  }
-
-  return mapa;
-}
-
-// ==========================
-// Fornecedor mais pago
-// ==========================
-function fornecedorTop(despesas) {
-  const map = {};
-
-  for (const d of despesas) {
-    const f = d.nomeFornecedor || "NÃO INFORMADO";
-    if (!map[f]) map[f] = 0;
-    map[f] += d.valorLiquido;
-  }
-
-  const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
-  const top = entries[0];
-  const total = entries.reduce((acc, x) => acc + x[1], 0);
-
-  return {
-    fornecedor: top[0],
-    valor: top[1],
-    porcentagem: (top[1] / total) * 100,
-  };
-}
-
-// ==========================
-// Notas duplicadas (suspeita)
-// ==========================
-function notasDuplicadas(despesas) {
-  const map = {};
-  const dup = [];
-
-  for (const d of despesas) {
-    const chave = `${d.dataDocumento}-${d.valorLiquido}-${d.nomeFornecedor}`;
-    if (!map[chave]) map[chave] = 0;
-    map[chave]++;
-
-    if (map[chave] === 2) dup.push(d);
-  }
-
-  return dup;
-}
-
-// ==========================
-// Mês mais gastador
-// ==========================
-function mesMaisGastador(despesas) {
-  const map = {};
-
-  for (const d of despesas) {
-    const mes = d.mes || "0";
-    if (!map[mes]) map[mes] = 0;
-    map[mes] += d.valorLiquido;
-  }
-
-  const top = Object.entries(map).sort((a, b) => b[1] - a[1])[0];
-  return { mes: top[0], total: top[1] };
-}
-
-// ==========================
-// Gráfico ASCII
-// ==========================
-function graficoAscii(categorias) {
-  const total = Object.values(categorias).reduce((a, b) => a + b, 0);
-
-  let out = "\n📊 *Gastos por categoria:*\n";
-
-  for (const [cat, val] of Object.entries(categorias)) {
-    const pct = (val / total) * 100;
-    const barras = "█".repeat(Math.round(pct / 5));
-    out += `${cat}: ${barras} ${pct.toFixed(1)}%\n`;
-  }
-
-  return out;
-}
-
-// ==========================
-// COMANDO PRINCIPAL
-// ==========================
-export async function cmdDeputado(nome) {
-  if (!nome) return "Use: *!deputado Nome*";
-
-  const dep = await buscarDeputado(nome);
-  if (!dep) return `Nenhum deputado encontrado: *${nome}*`;
-
-  const despesas = await buscarDespesas(dep.id);
-
-  if (!despesas.length)
-    return `Nenhuma despesa encontrada para *${dep.nome}*`;
-
-  // cálculos
-  const total = despesas.reduce((acc, x) => acc + x.valorLiquido, 0);
-  const categorias = agruparCategorias(despesas);
-  const topFornecedor = fornecedorTop(despesas);
-  const duplicadas = notasDuplicadas(despesas);
-  const picoMes = mesMaisGastador(despesas);
-  const grafico = graficoAscii(categorias);
-
-  // texto final
-  return `
-🕵️ *Zeffa Dedo Duro investigou ${dep.nome}:*
-
-💸 *Total gasto:* R$ ${total.toFixed(2)}
-🧾 *Fornecedor favorito:* ${topFornecedor.fornecedor} (${topFornecedor.porcentagem.toFixed(
-    1
-  )}% do total)
-📆 *Mês mais gastador:* ${picoMes.mes} (R$ ${picoMes.total.toFixed(2)})
-📄 *Notas duplicadas:* ${duplicadas.length > 0 ? duplicadas.length : "nenhuma"}
-
-${grafico}
-
-Zeffa analisou tudo — *sem dó, sem piedade* 😘
-`;
-}
+// FIM
