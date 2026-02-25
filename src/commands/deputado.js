@@ -1,11 +1,23 @@
 // INÍCIO — Importações
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-dotenv.config();
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Carregar .env da raiz do projeto
+dotenv.config({
+  path: path.join(__dirname, "../../.env"),
+});
 // FIM
 
 // 🔐 Chave CGU
 const CGU_KEY = process.env.CGU_API_KEY;
+
+if (!CGU_KEY) {
+  console.error("❌ ERRO CRÍTICO: CGU_API_KEY não carregada do .env");
+}
 
 // Helper para chamar API CGU
 async function cguGet(endpoint) {
@@ -18,7 +30,10 @@ async function cguGet(endpoint) {
     },
   });
 
-  if (!resp.ok) throw new Error("Erro CGU: " + resp.status);
+  if (!resp.ok) {
+    console.error("❌ Erro CGU:", resp.status, url);
+    throw new Error("Erro CGU: " + resp.status);
+  }
 
   return await resp.json();
 }
@@ -37,11 +52,10 @@ export async function cmdDeputado(sock, msg, args) {
 
     console.log("🔍 Buscando deputado:", nomeBusca);
 
-    // 1 — Buscar deputado na API da Câmara
+    // 1 — Buscar deputado
     const urlBusca = `https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(
       nomeBusca
     )}`;
-
     const respBusca = await fetch(urlBusca);
     const dadosBusca = await respBusca.json();
 
@@ -55,7 +69,7 @@ export async function cmdDeputado(sock, msg, args) {
     const deputado = dadosBusca.dados[0];
     const id = deputado.id;
 
-    // 📌 Buscar dados pessoais
+    // 2 — Dados pessoais
     const detalhesResp = await fetch(
       `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`
     );
@@ -65,15 +79,12 @@ export async function cmdDeputado(sock, msg, args) {
     const partido = info?.ultimoStatus?.siglaPartido || "Desconhecido";
     const uf = info?.ultimoStatus?.siglaUf || "--";
 
-    // ----------------------------------------------------
-
-    // 📌 2 — Buscar despesas (cota parlamentar)
+    // 3 — Despesas
     const despesasResp = await fetch(
       `https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/despesas?itens=1000`
     );
     const despesasJson = await despesasResp.json();
     const despesas = despesasJson.dados;
-
     const totalCota = despesas.reduce(
       (s, d) => s + (d.valorLiquido || 0),
       0
@@ -83,23 +94,20 @@ export async function cmdDeputado(sock, msg, args) {
       currency: "BRL",
     });
 
-    // ----------------------------------------------------
-
-    // 📌 3 — CGU — Buscar CPF do deputado
+    // 4 — CGU — Buscar CPF
     const pessoa = await cguGet(
       `pessoas?nome=${encodeURIComponent(deputado.nome)}`
     );
-
     const cpf = pessoa?.[0]?.cpf || null;
 
     // ----------------------------------------------------
 
-    // 📌 4 — CGU — Buscar vínculos (pra puxar salário)
-    let salario = "Não encontrado";
+    let salarioFinal = "Não localizado";
     let cargo = "—";
     let vinculoId = null;
 
     if (cpf) {
+      // 5 — Vínculos
       const vinculos = await cguGet(
         `servidores/vinculos?cpf=${cpf}&pagina=1`
       );
@@ -112,11 +120,7 @@ export async function cmdDeputado(sock, msg, args) {
       }
     }
 
-    // ----------------------------------------------------
-
-    // 📌 5 — CGU — Buscar salário do deputado
-    let salarioFinal = "Não localizado";
-
+    // 6 — Salário
     if (vinculoId) {
       const remuneracao = await cguGet(
         `servidores/remuneracao?codigo=VINCULO:${vinculoId}`
@@ -132,11 +136,8 @@ export async function cmdDeputado(sock, msg, args) {
       }
     }
 
-    // ----------------------------------------------------
-
-    // 📌 6 — CGU — Buscar assessores do gabinete
+    // 7 — Assessores
     let assessores = [];
-
     if (cpf) {
       assessores = await cguGet(
         `servidores/porOrgao?codigoOrgao=20&page=1&cpfParlamentar=${cpf}`
@@ -145,7 +146,6 @@ export async function cmdDeputado(sock, msg, args) {
 
     const totalAssessores = assessores.length;
 
-    // Somar folha
     let totalFolha = 0;
     const ranking = [];
 
@@ -168,7 +168,7 @@ export async function cmdDeputado(sock, msg, args) {
     const maiorAssessor = ranking.sort((a, b) => b.salario - a.salario)[0];
 
     // ----------------------------------------------------
-    // 📌 7 — Montar mensagem final
+    // Mensagem final
 
     const resposta = `
 🕵️ *Zeffa investigou ${deputado.nome}:*
@@ -188,16 +188,16 @@ export async function cmdDeputado(sock, msg, args) {
     )}
 
 ━━━━━━━━━━━━━━━━━━
-📌 *COTA PARLAMENTAR (despesas reembolsáveis)*
+📌 *COTA PARLAMENTAR*
 Total gasto: ${totalCotaBR}
 
 ━━━━━━━━━━━━━━━━━━
 📚 *Fontes oficiais*
-• Câmara dos Deputados — Dados Abertos
-• Portal da Transparência — CGU (API oficial)
+• Câmara dos Deputados
+• Portal da Transparência — CGU
 ━━━━━━━━━━━━━━━━━━
 
-🔥 *Zeffa varreu TUDO. Sem dó 😘*
+🔥 *Zeffa varreu tudo.*
 `;
 
     await sock.sendMessage(msg.from, { text: resposta });

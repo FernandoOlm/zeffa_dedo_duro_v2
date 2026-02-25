@@ -1,6 +1,12 @@
 // INÍCIO — Carregar variáveis de ambiente
 import * as dotenv from "dotenv";
-dotenv.config({ path: './.env' }); 
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Carrega sempre do root do projeto, independente de onde o index.js está
+dotenv.config({ path: path.join(__dirname, "../../.env") });
 // FIM — ENV
 
 // INÍCIO — Imports básicos
@@ -52,41 +58,34 @@ async function startBot() {
 
     console.log("📥 Mensagem:", texto);
 
-    // Separar comando + argumentos
     const partes = texto.trim().split(" ");
-    const comando = partes.shift()?.toLowerCase();  // !deputado
-    const args = partes || [];                      // ["nikolas","ferreira"]
+    const comando = partes.shift()?.toLowerCase();
+    const args = partes || [];
 
-    // 🔔 !ping
     if (comando === "!ping") {
       await comandoPing(sock, { from, texto });
       return;
     }
 
-    // 🏛️ !deputado nome
     if (comando === "!deputado") {
       await cmdDeputado(sock, { from, texto }, args);
       return;
     }
-    
-      // 🟦 !senador nome
-   if (comando === "!senador") {
-    await cmdSenador(sock, { from, texto }, args);
-    return;
-  }
 
-  // 🟩 !presidente
-   if (comando === "!presidente") {
-    await cmdPresidente(sock, { from, texto }, args);
-    return;
-  }
+    if (comando === "!senador") {
+      await cmdSenador(sock, { from, texto }, args);
+      return;
+    }
 
-  // 🟨 !governador nome
-   if (comando === "!governador") {
-    await cmdGovernador(sock, { from, texto }, args);
-    return;
-  }
+    if (comando === "!presidente") {
+      await cmdPresidente(sock, { from, texto }, args);
+      return;
+    }
 
+    if (comando === "!governador") {
+      await cmdGovernador(sock, { from, texto }, args);
+      return;
+    }
   });
 }
 
