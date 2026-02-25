@@ -10,7 +10,7 @@ import { verificaSancoes } from "../utils/sancoes.js";
 async function status(sock, jid, msg) {
   await sock.sendMessage(jid, { text: msg });
 }
-import salariosGabinete from "../data/salariosGabinete.json" assert { type: "json" };
+import salariosGabinete from "../data/salariosGabinete.json" with { type: "json" };
 // FIM
 // =============== SCRAPER — GABINETE ===============
 async function scrapeGabinete(id) {
