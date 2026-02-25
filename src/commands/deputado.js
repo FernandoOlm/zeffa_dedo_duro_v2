@@ -211,15 +211,23 @@ for (const f of ceap.top) {
     ...flags
   });
 }
+// ============================ MONTAR RESPOSTA ============================
+let txt = `🕵️ *Zeffa investigou ${nome}:*\n(${partido} - ${uf})\n\n`;
 
-    // ============================ MONTAR RESPOSTA ============================
-    let txt = `🕵️ *Zeffa investigou ${nome}:*\n(${partido} - ${uf})\n\n`;
-
-    txt += "━━━━━━━━━━━━━━━━━━\n";
-    txt += `📌 *REMUNERAÇÃO*\nBruto: ${salario.bruto ?? "Indisp."}\nLíquido: ${salario.liquido ?? "Indisp."}\n\n`;
+txt += "━━━━━━━━━━━━━━━━━━\n";
+txt += `📌 *REMUNERAÇÃO*\nBruto: ${salario.bruto ?? "Indisp."}\nLíquido: ${salario.liquido ?? "Indisp."}\n\n`;
 
 txt += "━━━━━━━━━━━━━━━━━━\n";
 txt += `📌 *GABINETE*\n${gabinete.length} assessores\n`;
+
+// INÍCIO — soma total salários gabinete
+let totalGabinete = 0;
+for (const a of gabinete) {
+  const sal = salariosGabinete[a.remuneracao] || 0;
+  totalGabinete += sal;
+}
+txt += `Valor total — R$ ${totalGabinete.toLocaleString("pt-BR")}\n\n`;
+// FIM
 
 if (gabinete.length === 0) {
   txt += "• Nenhum assessor encontrado\n\n";
@@ -236,16 +244,16 @@ if (gabinete.length === 0) {
     if (a.salarioEstimado) {
       txt += `  💰 Salário estimado: R$ ${a.salarioEstimado.toLocaleString("pt-BR")}\n`;
     }
-    // FIM — Exibição do salário
+    // FIM
   }
 
   txt += "\n";
 }
 
-    txt += "━━━━━━━━━━━━━━━━━━\n";
-    txt += `📌 *EMENDAS*\nAutorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\nPago: R$ ${totalPagas.toLocaleString("pt-BR")}\nTotal: ${emendas.length} emendas\n\n`;
+txt += "━━━━━━━━━━━━━━━━━━\n";
+txt += `📌 *EMENDAS*\nAutorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\nPago: R$ ${totalPagas.toLocaleString("pt-BR")}\nTotal: ${emendas.length} emendas\n\n`;
 
-   txt += "━━━━━━━━━━━━━━━━━━\n";
+txt += "━━━━━━━━━━━━━━━━━━\n";
 txt += `📌 *CEAP — Cota Parlamentar*\n`;
 txt += `Total 2023: R$ ${ceap.totPorAno[2023].toLocaleString("pt-BR")}\n`;
 txt += `Total 2024: R$ ${ceap.totPorAno[2024].toLocaleString("pt-BR")}\n`;
@@ -259,29 +267,38 @@ for (const f of ceap.top) {
   const flag = fornecedoresSanções.find(x => x.cnpj === f.cnpj);
 
   txt += `• *${f.nome}* (${f.cnpj}) — R$ ${f.total.toLocaleString("pt-BR")}\n`;
-  txt += `  🚨 CEIS: ${flag.ceis ? "SIM" : "NÃO"} | `
-  txt += `⚠️ CNEP: ${flag.cnep ? "SIM" : "NÃO"} | `
-  txt += `❌ CEAF: ${flag.ceaf ? "SIM" : "NÃO"} | `
+  txt += `  🚨 CEIS: ${flag.ceis ? "SIM" : "NÃO"} | `;
+  txt += `⚠️ CNEP: ${flag.cnep ? "SIM" : "NÃO"} | `;
+  txt += `❌ CEAF: ${flag.ceaf ? "SIM" : "NÃO"} | `;
   txt += `❗ CEPIM: ${flag.cepim ? "SIM" : "NÃO"}\n\n`;
 }
-    txt += "━━━━━━━━━━━━━━━━━━\n";
-    txt += "💳 *CARTÃO CORPORATIVO*\n";
-    if (!vinculosCC.length) {
-      txt += "Nenhum vínculo encontrado.\n\n";
-    } else {
-      vinculosCC.forEach(v => {
-        txt += `• *${v.nome}* (${v.cnpj}) — ${v.qtd} registros — R$ ${v.totalCartao.toLocaleString(
-  "pt-BR"
-)}\n`;
-      });
-      txt += "\n";
-    }
 
-    txt += "━━━━━━━━━━━━━━━━━━\n";
-    txt += "📌 *FONTES*\n• Câmara dos Deputados\n• Portal da Transparência (CGU)\n• SigaBrasil / Senado\n• CEIS / CNEP / CEAF / CEPIM\n\n";
-    txt += "🔥 *Zeffa FULL MODE.*";
+txt += "━━━━━━━━━━━━━━━━━━\n";
+txt += "💳 *CARTÃO CORPORATIVO*\n";
 
-    await sock.sendMessage(jid, { text: txt });
+// INÍCIO — soma total cartão corporativo
+let totalCartao = 0;
+for (const v of vinculosCC) {
+  totalCartao += v.totalCartao || 0;
+}
+txt += `Valor total — R$ ${totalCartao.toLocaleString("pt-BR")}\n\n`;
+// FIM
+
+if (!vinculosCC.length) {
+  txt += "Nenhum vínculo encontrado.\n\n";
+} else {
+  vinculosCC.forEach(v => {
+    txt += `• *${v.nome}* (${v.cnpj}) — ${v.qtd} registros — R$ ${v.totalCartao.toLocaleString("pt-BR")}\n`;
+  });
+  txt += "\n";
+}
+
+txt += "━━━━━━━━━━━━━━━━━━\n";
+txt += "📌 *FONTES*\n• Câmara dos Deputados\n• Portal da Transparência (CGU)\n• SigaBrasil / Senado\n• CEIS / CNEP / CEAF / CEPIM\n\n";
+txt += "🔥 *Zeffa FULL MODE.*";
+
+await sock.sendMessage(jid, { text: txt });
+
   } catch (err) {
     console.error("ERRO GERAL:", err);
     await status(sock, jid, "❌ Erro ao gerar relatório.");
