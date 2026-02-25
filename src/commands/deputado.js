@@ -218,11 +218,16 @@ for (const f of ceap.top) {
     txt += `📌 *REMUNERAÇÃO*\nBruto: ${salario.bruto ?? "Indisp."}\nLíquido: ${salario.liquido ?? "Indisp."}\n\n`;
 
     txt += "━━━━━━━━━━━━━━━━━━\n";
-    txt += `📌 *GABINETE*\n${gabinete.length} assessores\n`;
-    gabinete.slice(0, 5).forEach(a => {
-      txt += `• ${a.nome} — ${a.cargo} — ${a.remuneracao}\n`;
-    });
-    txt += "\n";
+txt += `📌 *GABINETE*\n${gabinete.length} assessores\n`;
+
+if (gabinete.length === 0) {
+  txt += "• Nenhum assessor encontrado\n\n";
+} else {
+  for (const a of gabinete) {
+    txt += `• *${a.nome}* — ${a.cargo} — ${a.remuneracao} — ${a.data}\n`;
+  }
+  txt += "\n";
+}
 
     txt += "━━━━━━━━━━━━━━━━━━\n";
     txt += `📌 *EMENDAS*\nAutorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\nPago: R$ ${totalPagas.toLocaleString("pt-BR")}\nTotal: ${emendas.length} emendas\n\n`;

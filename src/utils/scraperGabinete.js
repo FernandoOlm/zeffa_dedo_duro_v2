@@ -1,38 +1,35 @@
-// INÍCIO — Scraper do gabinete (assessores)
+// INÍCIO — Scraper completo do gabinete
 import axios from "axios";
 import * as cheerio from "cheerio";
-import { wrapper } from "axios-cookiejar-support";
-import { CookieJar } from "tough-cookie";
 
 export async function scrapeGabinete(deputadoId) {
   try {
-    const jar = new CookieJar();
-    const client = wrapper(axios.create({ jar }));
+    const url = `https://www.camara.leg.br/deputados/${deputadoId}/pessoal-gabinete`;
 
-    const url = `https://www2.camara.leg.br/transparencia/recursos-humanos/cargos-e-funcoes/cargos-em-comissao-e-funcoes-de-confianca/gabinete-parlamentar/${deputadoId}`;
-
-    const { data: html } = await client.get(url, {
+    const { data: html } = await axios.get(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
     });
 
     const $ = cheerio.load(html);
 
-    const assessores = [];
+    const resultados = [];
 
-    $("table tbody tr").each((_, el) => {
-      const tds = $(el).find("td");
+    $(".tabela-servidores tbody tr").each((_, el) => {
+      const cols = $(el).find("td");
 
-      assessores.push({
-        nome: $(tds[0]).text().trim(),
-        cargo: $(tds[1]).text().trim(),
-        remuneracao: $(tds[2]).text().trim(),
-        situacao: $(tds[3]).text().trim(),
+      resultados.push({
+        nome: $(cols[0]).text().trim(),
+        cargo: $(cols[1]).text().trim(),
+        nivel: $(cols[2]).text().trim(),
+        lotacao: $(cols[3]).text().trim(),
+        admissao: $(cols[4]).text().trim(),
+        situacao: $(cols[5]).text().trim(),
       });
     });
 
-    return assessores;
+    return resultados;
   } catch (err) {
-    console.log("Erro no scraping de gabinete:", err.message);
+    console.error("Erro scraping gabinete:", err.message);
     return [];
   }
 }
