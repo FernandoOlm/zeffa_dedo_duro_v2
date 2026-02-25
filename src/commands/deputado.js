@@ -173,9 +173,11 @@ export async function cmdDeputado(sock, jid, args) {
 
     // 4) Emendas
     await status(sock, jid, "📑 Pegando emendas parlamentares...");
-    const emendas = await pegaEmendas(nome, CGU_KEY);
-    const totalEmendas = emendas.reduce((s, e) => s + (e.autorizado || 0), 0);
-    const totalPagas = emendas.reduce((s, e) => s + (e.pago || 0), 0);
+// ===== EMENDAS ===================================================
+const { lista: emendas, total: totalEmendas } = await pegaEmendas({
+  idDeputado,
+  nome
+});
 
     // 5) CEAP
     await status(sock, jid, "📦 Pegando gastos CEAP...");
@@ -251,7 +253,9 @@ if (gabinete.length === 0) {
 }
 
 txt += "━━━━━━━━━━━━━━━━━━\n";
-txt += `📌 *EMENDAS*\nAutorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\nPago: R$ ${totalPagas.toLocaleString("pt-BR")}\nTotal: ${emendas.length} emendas\n\n`;
+txt += `📌 *EMENDAS*\n`;
+txt += `Autorizado: R$ ${totalEmendas.toLocaleString("pt-BR")}\n`;
+txt += `Total: ${emendas.length} emendas\n\n`;
 
 txt += "━━━━━━━━━━━━━━━━━━\n";
 txt += `📌 *CEAP — Cota Parlamentar*\n`;
