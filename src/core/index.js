@@ -7,6 +7,9 @@ import qrcode from "qrcode-terminal";
 
 import { cmdDeputado } from "../commands/deputado.js";
 import { comandoPing } from "../commands/ping.js";
+import { cmdSenador } from "../commands/senador.js";
+import { cmdPresidente } from "../commands/presidente.js";
+import { cmdGovernador } from "../commands/governador.js";
 // FIM — Imports
 
 // BOT
@@ -60,6 +63,27 @@ async function startBot() {
       await cmdDeputado(sock, { from, texto }, args);
       return;
     }
+    
+      // 🟦 !senador nome
+   if (comando === "!senador") {
+    await cmdSenador(sock, { from, texto }, args);
+    return;
+  }
+
+  // 🟩 !presidente
+   if (comando === "!presidente") {
+    await cmdPresidente(sock, { from, texto }, args);
+    return;
+  }
+
+  // 🟨 !governador nome
+   if (comando === "!governador") {
+    await cmdGovernador(sock, { from, texto }, args);
+    return;
+  }
+
+
+
   });
 }
 
